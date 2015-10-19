@@ -20,7 +20,7 @@
 use devtools;
 use devtools_traits::ScriptToDevtoolsControlMsg;
 use devtools_traits::{DevtoolScriptControlMsg, DevtoolsPageInfo};
-use document_loader::{DocumentLoader, LoadType, NotifierData};
+use document_loader::{DocumentLoader, NotifierData};
 use dom::bindings::cell::DOMRefCell;
 use dom::bindings::codegen::Bindings::DocumentBinding::{DocumentMethods, DocumentReadyState};
 use dom::bindings::codegen::InheritTypes::{ElementCast, EventCast, EventTargetCast, NodeCast};
@@ -947,10 +947,6 @@ impl ScriptTask {
                 self.handle_tick_all_animations(pipeline_id),
             ConstellationControlMsg::WebFontLoaded(pipeline_id) =>
                 self.handle_web_font_loaded(pipeline_id),
-            ConstellationControlMsg::StylesheetLoadComplete(id, url, responder) => {
-                responder.respond();
-                self.handle_resource_loaded(id, LoadType::Stylesheet(url));
-            }
             ConstellationControlMsg::GetCurrentState(sender, pipeline_id) => {
                 let state = self.handle_get_current_state(pipeline_id);
                 sender.send(state).unwrap();
@@ -1084,13 +1080,6 @@ impl ScriptTask {
             return;
         }
         panic!("Page rect message sent to nonexistent pipeline");
-    }
-
-    /// Handle a request to load a page in a new child frame of an existing page.
-    fn handle_resource_loaded(&self, pipeline: PipelineId, load: LoadType) {
-        let page = get_page(&self.root_page(), pipeline);
-        let doc = page.document();
-        doc.r().finish_load(load);
     }
 
     /// Get the current state of a given pipeline.
@@ -1901,7 +1890,10 @@ impl ScriptTask {
         let document = page.document();
         let final_url = document.r().url();
 
+        // https://html.spec.whatwg.org/multipage/#the-end step 1
         document.r().set_ready_state(DocumentReadyState::Interactive);
+
+        // TODO: Execute step 2 here.
 
         // Kick off the initial reflow of the page.
         debug!("kicking off initial reflow of {:?}", final_url);
@@ -1914,14 +1906,17 @@ impl ScriptTask {
         // No more reflow required
         page.set_reflow_status(false);
 
-        // https://html.spec.whatwg.org/multipage/#the-end step 4
-        let addr: Trusted<Document> = Trusted::new(self.get_cx(), document.r(), self.chan.clone());
-        let handler = box DocumentProgressHandler::new(addr, DocumentProgressTask::DOMContentLoaded);
-        self.chan.send(CommonScriptMsg::RunnableMsg(ScriptTaskEventCategory::DocumentEvent, handler)).unwrap();
+        // https://html.spec.whatwg.org/multipage/#the-end step 3
+        document.r().process_deferred_scripts();
+
+        // https://html.spec.whatwg.org/multipage/#the-end step 4. Also implemented in step 3 above.
+        document.r().maybe_dispatch_dom_content_loaded();
 
         window.r().set_fragment_name(final_url.fragment.clone());
 
         // Notify devtools that a new script global exists.
+        //TODO: should this happen as soon as the global is created, or at least once the first
+        // script runs?
         self.notify_devtools(document.r().Title(), (*final_url).clone(), (id, None));
     }
 }
