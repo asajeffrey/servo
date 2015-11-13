@@ -11,26 +11,243 @@ use js::rust::ToString;
 use libc::c_char;
 use num_lib::ToPrimitive;
 use opts;
+use serde;
 use std::ascii::AsciiExt;
 use std::borrow::ToOwned;
 use std::char;
+use std::cmp::Ordering;
 use std::convert::AsRef;
 use std::ffi::CStr;
 use std::fmt;
 use std::iter::{Filter, Peekable};
+use std::mem;
 use std::ops::{Deref, DerefMut};
 use std::ptr;
 use std::slice;
-use std::str::{CharIndices, FromStr, Split, from_utf8};
+use std::str::{CharIndices, FromStr, Split, from_utf8, from_utf8_unchecked};
 
+// An in-place string is 22 bytes of UTF-encoded string,
+// together with its length in bytes and its length in characters.
+
+#[derive(Clone, Copy, PartialEq, Eq, Hash)]
+struct InPlaceString {
+    bytelen: u8,
+    charlen: u8,
+    data: [u8; 22]
+}
+
+// Can't find this in the std library
+unsafe fn from_utf8_unchecked_mut(v: &mut [u8]) -> &mut str {
+    mem::transmute(v)
+}
+
+impl InPlaceString {
+    pub fn new() -> InPlaceString {
+        InPlaceString{ bytelen: 0, charlen:0, data: [0; 22] }
+    }
+    pub fn as_bytes(&self) -> &[u8] {
+        &self.data[..(self.bytelen as usize)]
+    }
+    pub fn as_bytes_mut(&mut self) -> &mut [u8] {
+        &mut self.data[..(self.bytelen as usize)]
+    }
+    pub fn as_str(&self) -> &str {
+       unsafe { from_utf8_unchecked(self.as_bytes()) }
+    }
+    pub fn as_str_mut(&mut self) -> &mut str {
+       unsafe { from_utf8_unchecked_mut(self.as_bytes_mut()) }
+    }
+    #[inline]
+    fn maybe_from(string: &str) -> Option<InPlaceString> {
+        let bytes = string.as_bytes();
+        if bytes.len() <= 22 {
+            let mut result = InPlaceString {
+                bytelen: bytes.len() as u8,
+                charlen: string.len() as u8,
+                data: [0; 22],
+            };
+            for (i,b) in bytes.iter().enumerate() {
+                result.data[i] = *b;
+            }
+            Some(result)
+        } else {
+            None
+        }
+    }
+}
+
+// An unpacked DOM String is either a String on the heap,
+// or an in-place string. Logically, this is the representation
+// of strings, but the unpacked version is 4 words, compared to 3 for a String,
+
+#[derive(Clone, PartialEq, Eq, Hash)]
+enum UnpackedDOMString {
+    OnHeap(String),
+    InPlace(InPlaceString),
+}
+
+impl UnpackedDOMString {
+    pub fn new() -> UnpackedDOMString {
+        UnpackedDOMString::InPlace(InPlaceString::new())
+    }
+    pub fn push_str(&mut self, string: &str) {
+        *self = match *self {
+            UnpackedDOMString::OnHeap(ref mut this) => {
+                this.push_str(string);
+                return;
+            },
+            UnpackedDOMString::InPlace(ref mut this) => {
+                let bytelen = (this.bytelen as usize) + string.as_bytes().len();
+                if bytelen <= 22 {
+                    let charlen = (this.charlen as usize) + string.len();
+                    for (i,b) in string.as_bytes().iter().enumerate() {
+                        this.data[(this.bytelen as usize) + i] = *b;
+                    }
+                    this.bytelen = bytelen as u8;
+                    this.charlen = charlen as u8;
+                    return;
+                } else {
+                    let mut result = String::with_capacity(bytelen);
+                    result.push_str(this.as_str());
+                    result.push_str(string);
+                    UnpackedDOMString::OnHeap(result)
+                }
+            }
+        }
+    }
+    pub fn clear(&mut self) {
+        // NOTE: This discards the backing store for heap-allocated strings.
+        // This is possibly inefficient, but means we can just use the derived
+        // implementations of Eq and Hash, since there is no overlap between
+        // in-place and heap-allocated strings.
+        *self = UnpackedDOMString::InPlace(InPlaceString::new());
+    }
+}
+
+impl PartialOrd for UnpackedDOMString {
+    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+        (&**self).partial_cmp(&**other)
+    }
+}
+
+impl Ord for UnpackedDOMString {
+    fn cmp(&self, other: &Self) -> Ordering {
+        (&**self).cmp(&**other)
+    }
+}
+
+impl fmt::Debug for UnpackedDOMString {
+    fn fmt(&self, formatter: &mut fmt::Formatter) -> Result<(), fmt::Error> {
+        (&**self).fmt(formatter)
+    }
+}
+
+impl serde::Deserialize for UnpackedDOMString {
+    fn deserialize<D>(deserializer: &mut D) -> Result<Self, D::Error> where D: serde::Deserializer {
+        let string: String = try!(serde::Deserialize::deserialize(deserializer));
+        Ok(UnpackedDOMString::from(string))
+    }
+}
+
+impl serde::Serialize for UnpackedDOMString {
+    fn serialize<S>(&self, serializer: &mut S) -> Result<(), S::Error> where S: serde::Serializer {
+        (&**self).serialize(serializer)
+    }
+}
+
+impl Default for UnpackedDOMString {
+    fn default() -> Self {
+        UnpackedDOMString::new()
+    }
+}
+
+impl Deref for UnpackedDOMString {
+    type Target = str;
+
+    #[inline]
+    fn deref(&self) -> &str {
+        match *self {
+            UnpackedDOMString::OnHeap(ref this) => &**this,
+            UnpackedDOMString::InPlace(ref this) => this.as_str(),
+        }
+    }
+}
+
+impl DerefMut for UnpackedDOMString {
+    #[inline]
+    fn deref_mut(&mut self) -> &mut str {
+        match *self {
+            UnpackedDOMString::OnHeap(ref mut this) => &mut **this,
+            UnpackedDOMString::InPlace(ref mut this) => this.as_str_mut(),
+        }
+    }
+}
+
+impl AsRef<str> for UnpackedDOMString {
+    fn as_ref(&self) -> &str {
+        &**self
+    }
+}
+
+impl fmt::Display for UnpackedDOMString {
+    #[inline]
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        fmt::Display::fmt(&**self, f)
+    }
+}
+
+impl PartialEq<str> for UnpackedDOMString {
+    fn eq(&self, other: &str) -> bool {
+        &**self == other
+    }
+}
+
+impl<'a> PartialEq<&'a str> for UnpackedDOMString {
+    fn eq(&self, other: &&'a str) -> bool {
+        &**self == *other
+    }
+}
+
+impl<'a> From<&'a str> for UnpackedDOMString {
+    fn from(string: &str) -> UnpackedDOMString {
+        InPlaceString::maybe_from(string).map(UnpackedDOMString::InPlace)
+            .unwrap_or_else(|| { UnpackedDOMString::OnHeap(String::from(string)) })
+    }
+}
+
+impl From<String> for UnpackedDOMString {
+    fn from(string: String) -> UnpackedDOMString {
+        InPlaceString::maybe_from(&*string).map(UnpackedDOMString::InPlace)
+            .unwrap_or(UnpackedDOMString::OnHeap(string))
+    }
+}
+
+impl Into<String> for UnpackedDOMString {
+    fn into(self) -> String {
+        match self {
+            UnpackedDOMString::OnHeap(this) => this,
+            UnpackedDOMString::InPlace(this) => String::from(this.as_str()),
+        }
+    }
+}
+
+impl Extend<char> for UnpackedDOMString {
+    fn extend<I>(&mut self, iterable: I) where I: IntoIterator<Item=char> {
+        // FIXME(ajeffrey): inefficient
+        let string: String = iterable.into_iter().collect();
+        self.push_str(&*string);
+    }
+}
+
+// As an experiment, make a DOMString just its unpacked representation
 #[derive(Clone, PartialOrd, Ord, PartialEq, Eq, Deserialize, Serialize, Hash, Debug)]
-pub struct DOMString(String);
+pub struct DOMString(UnpackedDOMString);
 
 impl !Send for DOMString {}
 
 impl DOMString {
     pub fn new() -> DOMString {
-        DOMString(String::new())
+        DOMString(UnpackedDOMString::new())
     }
     // FIXME(ajeffrey): implement more of the String methods on DOMString?
     pub fn push_str(&mut self, string: &str) {
@@ -43,7 +260,7 @@ impl DOMString {
 
 impl Default for DOMString {
     fn default() -> Self {
-        DOMString(String::new())
+        DOMString(UnpackedDOMString::new())
     }
 }
 
@@ -52,20 +269,20 @@ impl Deref for DOMString {
 
     #[inline]
     fn deref(&self) -> &str {
-        &self.0
+        &*self.0
     }
 }
 
 impl DerefMut for DOMString {
     #[inline]
     fn deref_mut(&mut self) -> &mut str {
-        &mut self.0
+        &mut *self.0
     }
 }
 
 impl AsRef<str> for DOMString {
     fn as_ref(&self) -> &str {
-        &self.0
+        &*self.0
     }
 }
 
@@ -90,25 +307,25 @@ impl<'a> PartialEq<&'a str> for DOMString {
 
 impl From<String> for DOMString {
     fn from(contents: String) -> DOMString {
-        DOMString(contents)
+        DOMString(UnpackedDOMString::from(contents))
     }
 }
 
 impl<'a> From<&'a str> for DOMString {
     fn from(contents: &str) -> DOMString {
-        DOMString::from(String::from(contents))
+        DOMString(UnpackedDOMString::from(contents))
     }
 }
 
 impl From<DOMString> for String {
     fn from(contents: DOMString) -> String {
-        contents.0
+        contents.0.into()
     }
 }
 
 impl Into<Vec<u8>> for DOMString {
     fn into(self) -> Vec<u8> {
-        self.0.into()
+        String::from(self).into()
     }
 }
 
@@ -131,8 +348,9 @@ pub enum StringificationBehavior {
 /// Convert the given `JSString` to a `DOMString`. Fails if the string does not
 /// contain valid UTF-16.
 pub unsafe fn jsstring_to_str(cx: *mut JSContext, s: *mut JSString) -> DOMString {
+    // FIXME(ajeffrey): convert short jsstrings directly to DOMStrings
     let latin1 = JS_StringHasLatin1Chars(s);
-    DOMString(if latin1 {
+    DOMString::from(if latin1 {
         latin1_to_string(cx, s)
     } else {
         let mut length = 0;
