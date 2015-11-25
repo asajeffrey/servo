@@ -25,6 +25,8 @@ use std::ops::{Deref, DerefMut};
 use std::ptr;
 use std::slice;
 use std::str::{CharIndices, FromStr, Split, from_utf8, from_utf8_unchecked};
+use std::hash::{Hash, Hasher};
+use string_cache::Atom;
 
 // An in-place string is 22 bytes of UTF-encoded string,
 // together with its length in bytes and its length in characters.
@@ -80,10 +82,11 @@ impl InPlaceString {
 // or an in-place string. Logically, this is the representation
 // of strings, but the unpacked version is 4 words, compared to 3 for a String,
 
-#[derive(Clone, PartialEq, Eq, Hash)]
+#[derive(Clone)]
 enum UnpackedDOMString {
     OnHeap(String),
     InPlace(InPlaceString),
+    Atomic(Atom),
 }
 
 impl UnpackedDOMString {
@@ -91,36 +94,31 @@ impl UnpackedDOMString {
         UnpackedDOMString::InPlace(InPlaceString::new())
     }
     pub fn push_str(&mut self, string: &str) {
-        *self = match *self {
-            UnpackedDOMString::OnHeap(ref mut this) => {
-                this.push_str(string);
-                return;
-            },
-            UnpackedDOMString::InPlace(ref mut this) => {
-                let bytelen = (this.bytelen as usize) + string.as_bytes().len();
-                if bytelen <= 22 {
-                    let charlen = (this.charlen as usize) + string.len();
-                    for (i,b) in string.as_bytes().iter().enumerate() {
-                        this.data[(this.bytelen as usize) + i] = *b;
-                    }
-                    this.bytelen = bytelen as u8;
-                    this.charlen = charlen as u8;
-                    return;
-                } else {
-                    let mut result = String::with_capacity(bytelen);
-                    result.push_str(this.as_str());
-                    result.push_str(string);
-                    UnpackedDOMString::OnHeap(result)
-                }
-            }
+        if let UnpackedDOMString::OnHeap(ref mut this) = *self {
+            this.push_str(string);
+        } else {
+            let mut buffer = String::with_capacity(self.len() + string.len());
+            buffer.push_str(&*self);
+            buffer.push_str(string);
+            *self = UnpackedDOMString::from(buffer);
         }
     }
     pub fn clear(&mut self) {
-        // NOTE: This discards the backing store for heap-allocated strings.
-        // This is possibly inefficient, but means we can just use the derived
-        // implementations of Eq and Hash, since there is no overlap between
-        // in-place and heap-allocated strings.
-        *self = UnpackedDOMString::InPlace(InPlaceString::new());
+        *self = UnpackedDOMString::new()
+    }
+}
+
+impl PartialEq for UnpackedDOMString {
+    fn eq(&self, other: &UnpackedDOMString) -> bool {
+        (&**self).eq(&**other)
+    }
+}
+
+impl Eq for UnpackedDOMString {}
+
+impl Hash for UnpackedDOMString {
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        (&**self).hash(state)
     }
 }
 
@@ -169,6 +167,7 @@ impl Deref for UnpackedDOMString {
         match *self {
             UnpackedDOMString::OnHeap(ref this) => &**this,
             UnpackedDOMString::InPlace(ref this) => this.as_str(),
+            UnpackedDOMString::Atomic(ref this) => &**this,
         }
     }
 }
@@ -179,6 +178,7 @@ impl DerefMut for UnpackedDOMString {
         match *self {
             UnpackedDOMString::OnHeap(ref mut this) => &mut **this,
             UnpackedDOMString::InPlace(ref mut this) => this.as_str_mut(),
+            UnpackedDOMString::Atomic(_) => panic!("Mutating atoms"), // FIXME(ajeffrey): mutating atoms?
         }
     }
 }
@@ -222,11 +222,18 @@ impl From<String> for UnpackedDOMString {
     }
 }
 
+impl From<Atom> for UnpackedDOMString {
+    fn from(contents: Atom) -> UnpackedDOMString {
+        UnpackedDOMString::Atomic(contents)
+    }
+}
+
 impl Into<String> for UnpackedDOMString {
     fn into(self) -> String {
         match self {
             UnpackedDOMString::OnHeap(this) => this,
             UnpackedDOMString::InPlace(this) => String::from(this.as_str()),
+            UnpackedDOMString::Atomic(this) => String::from(&*this),
         }
     }
 }
@@ -249,7 +256,6 @@ impl DOMString {
     pub fn new() -> DOMString {
         DOMString(UnpackedDOMString::new())
     }
-    // FIXME(ajeffrey): implement more of the String methods on DOMString?
     pub fn push_str(&mut self, string: &str) {
         self.0.push_str(string)
     }
@@ -317,6 +323,12 @@ impl<'a> From<&'a str> for DOMString {
     }
 }
 
+impl From<Atom> for DOMString {
+    fn from(contents: Atom) -> DOMString {
+        DOMString(UnpackedDOMString::from(contents))
+    }
+}
+
 impl From<DOMString> for String {
     fn from(contents: DOMString) -> String {
         contents.0.into()
@@ -326,6 +338,12 @@ impl From<DOMString> for String {
 impl Into<Vec<u8>> for DOMString {
     fn into(self) -> Vec<u8> {
         String::from(self).into()
+    }
+}
+
+impl Extend<char> for DOMString {
+    fn extend<I>(&mut self, iterable: I) where I: IntoIterator<Item=char> {
+        self.0.extend(iterable)
     }
 }
 
@@ -406,11 +424,11 @@ impl FromJSValConvertible for DOMString {
     }
 }
 
-impl Extend<char> for DOMString {
-    fn extend<I>(&mut self, iterable: I) where I: IntoIterator<Item=char> {
-        self.0.extend(iterable)
-    }
-}
+// impl Extend<char> for DOMString {
+//     fn extend<I>(&mut self, iterable: I) where I: IntoIterator<Item=char> {
+//         self.0.extend(iterable)
+//     }
+// }
 
 pub type StaticCharVec = &'static [char];
 pub type StaticStringVec = &'static [&'static str];
