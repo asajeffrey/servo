@@ -1804,16 +1804,16 @@ impl NodeMethods for Node {
             NodeTypeId::Element(..) => {
                 self.downcast::<Element>().unwrap().TagName()
             }
-            NodeTypeId::CharacterData(CharacterDataTypeId::Text) => DOMString::from("#text"),
+            NodeTypeId::CharacterData(CharacterDataTypeId::Text) => DOMString::from(atom!("#text")),
             NodeTypeId::CharacterData(CharacterDataTypeId::ProcessingInstruction) => {
                 self.downcast::<ProcessingInstruction>().unwrap().Target()
             }
-            NodeTypeId::CharacterData(CharacterDataTypeId::Comment) => DOMString::from("#comment"),
+            NodeTypeId::CharacterData(CharacterDataTypeId::Comment) => DOMString::from(atom!("#comment")),
             NodeTypeId::DocumentType => {
                 self.downcast::<DocumentType>().unwrap().name().clone()
             },
-            NodeTypeId::DocumentFragment => DOMString::from("#document-fragment"),
-            NodeTypeId::Document(_) => DOMString::from("#document")
+            NodeTypeId::DocumentFragment => DOMString::from(atom!("#document-fragment")),
+            NodeTypeId::Document => DOMString::from(atom!("#document"))
         }
     }
 

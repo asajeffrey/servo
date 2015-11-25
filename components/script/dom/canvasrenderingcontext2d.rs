@@ -1151,9 +1151,9 @@ impl CanvasRenderingContext2DMethods for CanvasRenderingContext2D {
     fn LineCap(&self) -> DOMString {
         let state = self.state.borrow();
         match state.line_cap {
-            LineCapStyle::Butt => DOMString::from("butt"),
-            LineCapStyle::Round => DOMString::from("round"),
-            LineCapStyle::Square => DOMString::from("square"),
+            LineCapStyle::Butt => DOMString::from(atom!("butt")),
+            LineCapStyle::Round => DOMString::from(atom!("round")),
+            LineCapStyle::Square => DOMString::from(atom!("square")),
         }
     }
 
@@ -1169,9 +1169,9 @@ impl CanvasRenderingContext2DMethods for CanvasRenderingContext2D {
     fn LineJoin(&self) -> DOMString {
         let state = self.state.borrow();
         match state.line_join {
-            LineJoinStyle::Round => DOMString::from("round"),
-            LineJoinStyle::Bevel => DOMString::from("bevel"),
-            LineJoinStyle::Miter => DOMString::from("miter"),
+            LineJoinStyle::Round => DOMString::from(atom!("round")),
+            LineJoinStyle::Bevel => DOMString::from(atom!("bevel")),
+            LineJoinStyle::Miter => DOMString::from(atom!("miter")),
         }
     }
 

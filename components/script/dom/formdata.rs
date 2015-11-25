@@ -116,7 +116,7 @@ impl FormData {
     fn get_file_from_blob(&self, value: &Blob, filename: Option<DOMString>) -> Root<File> {
         let global = self.global.root();
         let f = value.downcast::<File>();
-        let name = filename.unwrap_or(f.map(|inner| inner.name().clone()).unwrap_or(DOMString::from("blob")));
+        let name = filename.unwrap_or(f.map(|inner| inner.name().clone()).unwrap_or(DOMString::from(atom!("blob"))));
         File::new(global.r(), value, name)
     }
 }

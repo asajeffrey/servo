@@ -1665,7 +1665,7 @@ impl ScriptTask {
             }
 
             Some(ContentType(Mime(TopLevel::Text, SubLevel::Plain, _))) => {
-                Some(DOMString::from("text/plain"))
+                Some(DOMString::from(atom!("text/plain")))
             }
 
             _ => None
@@ -1972,7 +1972,7 @@ impl ScriptTask {
         // http://dev.w3.org/csswg/cssom-view/#resizing-viewports
         // https://dvcs.w3.org/hg/dom3events/raw-file/tip/html/DOM3-Events.html#event-type-resize
         let uievent = UIEvent::new(window.r(),
-                                   DOMString::from("resize"), EventBubbles::DoesNotBubble,
+                                   DOMString::from(atom!("resize")), EventBubbles::DoesNotBubble,
                                    EventCancelable::NotCancelable, Some(window.r()),
                                    0i32);
         uievent.upcast::<Event>().fire(window.upcast());

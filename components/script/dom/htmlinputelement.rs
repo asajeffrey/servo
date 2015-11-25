@@ -451,7 +451,7 @@ impl HTMLInputElement {
         let mut value = self.Value();
         if ty == atom!("radio") || ty == atom!("checkbox") {
             if value.is_empty() {
-                value = DOMString::from("on");
+                value = DOMString::from(atom!("on"));
             }
         }
         Some(FormDatum {
@@ -585,7 +585,7 @@ impl VirtualMethods for HTMLInputElement {
             &atom!("value") if !self.value_changed.get() => {
                 let value = mutation.new_value(attr).map(|value| (**value).to_owned());
                 self.textinput.borrow_mut().set_content(
-                    value.map(DOMString::from).unwrap_or(DOMString::from("")));
+                    value.map(DOMString::from).unwrap_or(DOMString::new()));
             },
             &atom!("name") if self.input_type.get() == InputType::InputRadio => {
                 self.radio_group_updated(
@@ -606,10 +606,11 @@ impl VirtualMethods for HTMLInputElement {
             &atom!("placeholder") => {
                 // FIXME(ajeffrey): Should we do in-place mutation of the placeholder?
                 let mut placeholder = self.placeholder.borrow_mut();
-                placeholder.clear();
                 if let AttributeMutation::Set(_) = mutation {
-                    placeholder.extend(
-                        attr.value().chars().filter(|&c| c != '\n' && c != '\r'));
+                    let filtered: String = attr.value().chars().filter(|&c| c != '\n' && c != '\r').collect();
+                    *placeholder = DOMString::from(filtered);
+                } else {
+                    *placeholder = DOMString::new()
                 }
             },
             _ => {},
@@ -850,13 +851,13 @@ impl Activatable for HTMLInputElement {
                     let target = self.upcast();
 
                     let event = Event::new(GlobalRef::Window(win.r()),
-                                           DOMString::from("input"),
+                                           DOMString::from(atom!("input")),
                                            EventBubbles::Bubbles,
                                            EventCancelable::NotCancelable);
                     event.fire(target);
 
                     let event = Event::new(GlobalRef::Window(win.r()),
-                                           DOMString::from("change"),
+                                           DOMString::from(atom!("change")),
                                            EventBubbles::Bubbles,
                                            EventCancelable::NotCancelable);
                     event.fire(target);
@@ -891,7 +892,7 @@ impl Activatable for HTMLInputElement {
                 }
             }
             None => {
-                let inputs = node.query_selector_iter(DOMString::from("input")).unwrap()
+                let inputs = node.query_selector_iter(DOMString::from(atom!("input"))).unwrap()
                     .filter_map(Root::downcast::<HTMLInputElement>)
                     .filter(|input| {
                         input.form_owner() == owner && match input.type_() {

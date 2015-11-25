@@ -125,7 +125,7 @@ impl DOMImplementationMethods for DOMImplementation {
         {
             // Step 3.
             let doc_node = doc.upcast::<Node>();
-            let doc_type = DocumentType::new(DOMString::from("html"), None, None, doc.r());
+            let doc_type = DocumentType::new(DOMString::from(atom!("html")), None, None, doc.r());
             doc_node.AppendChild(doc_type.upcast()).unwrap();
         }
 

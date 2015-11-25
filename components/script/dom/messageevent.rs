@@ -78,7 +78,7 @@ impl MessageEvent {
                           scope: GlobalRef,
                           message: HandleValue) {
         let messageevent = MessageEvent::new(
-            scope, DOMString::from("message"), false, false, message,
+            scope, DOMString::from(atom!("message")), false, false, message,
             DOMString::new(), DOMString::new());
         messageevent.upcast::<Event>().fire(target);
     }

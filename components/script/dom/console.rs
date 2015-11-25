@@ -76,7 +76,7 @@ impl ConsoleMethods for Console {
     // https://developer.mozilla.org/en-US/docs/Web/API/Console/assert
     fn Assert(&self, condition: bool, message: Option<DOMString>) {
         if !condition {
-            let message = message.unwrap_or_else(|| DOMString::from("no message"));
+            let message = message.unwrap_or_else(|| DOMString::from(atom!("no message")));
             println!("Assertion failed: {}", message);
             propagate_console_msg(&self, prepare_message(LogLevel::Error, message));
         }

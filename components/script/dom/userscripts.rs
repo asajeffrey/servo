@@ -42,7 +42,7 @@ pub fn load_script(head: &HTMLHeadElement) {
                 Ok(ref s) if s.ends_with(".js") => "file://".to_owned() + &s[..],
                 _ => continue
             };
-            let new_script = doc.CreateElement(DOMString::from("script")).unwrap();
+            let new_script = doc.CreateElement(DOMString::from(atom!("script"))).unwrap();
             let new_script = new_script.r();
             new_script.set_string_attribute(&atom!("src"), DOMString::from(name));
             node.InsertBefore(new_script.upcast(), first_child.r()).unwrap();

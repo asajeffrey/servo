@@ -174,7 +174,7 @@ impl HTMLTextAreaElementMethods for HTMLTextAreaElement {
 
     // https://html.spec.whatwg.org/multipage/#dom-textarea-type
     fn Type(&self) -> DOMString {
-        DOMString::from("textarea")
+        DOMString::from(atom!("textarea"))
     }
 
     // https://html.spec.whatwg.org/multipage/#dom-textarea-defaultvalue
@@ -238,7 +238,7 @@ impl HTMLTextAreaElement {
         let window = window_from_node(self);
         let window = window.r();
         let event = Event::new(GlobalRef::Window(window),
-                               DOMString::from("input"),
+                               DOMString::from(atom!("input")),
                                EventBubbles::DoesNotBubble,
                                EventCancelable::NotCancelable);
 
