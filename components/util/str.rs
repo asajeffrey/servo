@@ -240,9 +240,13 @@ impl Into<String> for UnpackedDOMString {
 
 impl Extend<char> for UnpackedDOMString {
     fn extend<I>(&mut self, iterable: I) where I: IntoIterator<Item=char> {
-        // FIXME(ajeffrey): inefficient
-        let string: String = iterable.into_iter().collect();
-        self.push_str(&*string);
+        if let UnpackedDOMString::OnHeap(ref mut this) = *self {
+            this.extend(iterable)
+        } else {
+            let mut buffer = String::from(&**self);
+            buffer.extend(iterable);
+            *self = UnpackedDOMString::from(buffer)            
+        }
     }
 }
 
@@ -258,9 +262,6 @@ impl DOMString {
     }
     pub fn push_str(&mut self, string: &str) {
         self.0.push_str(string)
-    }
-    pub fn clear(&mut self) {
-        self.0.clear()
     }
 }
 

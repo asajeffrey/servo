@@ -51,7 +51,7 @@ pub trait Activatable {
         let win = window_from_node(element);
         let target = element.upcast();
         let mouse = MouseEvent::new(win.r(),
-                                    DOMString::from("click"),
+                                    DOMString::from(atom!("click")),
                                     EventBubbles::DoesNotBubble,
                                     EventCancelable::NotCancelable,
                                     Some(win.r()),

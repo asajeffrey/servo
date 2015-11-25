@@ -78,7 +78,7 @@ impl Runnable for ImageResponseHandlerRunnable {
         // Fire image.onload
         let window = window_from_node(document.r());
         let event = Event::new(GlobalRef::Window(window.r()),
-                               DOMString::from("load"),
+                               DOMString::from(atom!("load")),
                                EventBubbles::DoesNotBubble,
                                EventCancelable::NotCancelable);
         event.fire(element.upcast());
@@ -148,7 +148,7 @@ impl HTMLImageElement {
                  width: Option<u32>,
                  height: Option<u32>) -> Fallible<Root<HTMLImageElement>> {
         let document = global.as_window().Document();
-        let image = HTMLImageElement::new(DOMString::from("img"), None, document.r());
+        let image = HTMLImageElement::new(DOMString::from(atom!("img")), None, document.r());
         if let Some(w) = width {
             image.SetWidth(w);
         }

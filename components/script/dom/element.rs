@@ -1053,7 +1053,7 @@ impl Element {
         // XXXManishearth this doesn't handle `javascript:` urls properly
         match UrlParser::new().base_url(&base).parse(&url) {
             Ok(parsed) => DOMString::from(parsed.serialize()),
-            Err(_) => DOMString::from(""),
+            Err(_) => DOMString::new(),
         }
     }
     pub fn set_url_attribute(&self, local_name: &Atom, value: DOMString) {

@@ -195,12 +195,12 @@ impl CSSStyleDeclarationMethods for CSSStyleDeclaration {
                                     .map(|&longhand| self.GetPropertyPriority(DOMString::from(longhand)))
                                     .all(|priority| priority == "important") {
 
-                return DOMString::from("important");
+                return DOMString::from(atom!("important"));
             }
         // Step 3
         } else {
             if self.owner.get_important_inline_style_declaration(&property).is_some() {
-                return DOMString::from("important");
+                return DOMString::from(atom!("important"));
             }
         }
 
@@ -336,12 +336,12 @@ impl CSSStyleDeclarationMethods for CSSStyleDeclaration {
 
     // https://dev.w3.org/csswg/cssom/#dom-cssstyledeclaration-cssfloat
     fn CssFloat(&self) -> DOMString {
-        self.GetPropertyValue(DOMString::from("float"))
+        self.GetPropertyValue(DOMString::from(atom!("float")))
     }
 
     // https://dev.w3.org/csswg/cssom/#dom-cssstyledeclaration-cssfloat
     fn SetCssFloat(&self, value: DOMString) -> ErrorResult {
-        self.SetPropertyValue(DOMString::from("float"), value)
+        self.SetPropertyValue(DOMString::from(atom!("float")), value)
     }
 
     // https://dev.w3.org/csswg/cssom/#the-cssstyledeclaration-interface

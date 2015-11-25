@@ -162,7 +162,7 @@ impl HTMLFormElement {
         // TODO: Handle browsing contexts
         // TODO: Handle validation
         let event = Event::new(GlobalRef::Window(win.r()),
-                               DOMString::from("submit"),
+                               DOMString::from(atom!("submit")),
                                EventBubbles::Bubbles,
                                EventCancelable::Cancelable);
         event.fire(self.upcast());
@@ -314,7 +314,7 @@ impl HTMLFormElement {
 
         let win = window_from_node(self);
         let event = Event::new(GlobalRef::Window(win.r()),
-                               DOMString::from("reset"),
+                               DOMString::from(atom!("reset")),
                                EventBubbles::Bubbles,
                                EventCancelable::Cancelable);
         event.fire(self.upcast());

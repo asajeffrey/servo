@@ -522,7 +522,7 @@ impl Document {
         self.ready_state.set(state);
 
         let event = Event::new(GlobalRef::Window(&self.window),
-                               DOMString::from("readystatechange"),
+                               DOMString::from(atom!("readystatechange")),
                                EventBubbles::DoesNotBubble,
                                EventCancelable::NotCancelable);
         let target = self.upcast::<EventTarget>();
@@ -607,9 +607,9 @@ impl Document {
                               client_point: Point2D<f32>,
                               mouse_event_type: MouseEventType) {
         let mouse_event_type_string = match mouse_event_type {
-            MouseEventType::Click => "click".to_owned(),
-            MouseEventType::MouseUp => "mouseup".to_owned(),
-            MouseEventType::MouseDown => "mousedown".to_owned(),
+            MouseEventType::Click => atom!("click"),
+            MouseEventType::MouseUp => atom!("mouseup"),
+            MouseEventType::MouseDown => atom!("mousedown"),
         };
         debug!("{}: at {:?}", mouse_event_type_string, client_point);
 
@@ -912,10 +912,9 @@ impl Document {
         let is_composing = false;
         let is_repeating = state == KeyState::Repeated;
         let ev_type = DOMString::from(match state {
-                                          KeyState::Pressed | KeyState::Repeated => "keydown",
-                                          KeyState::Released => "keyup",
-                                      }
-                                      .to_owned());
+                                          KeyState::Pressed | KeyState::Repeated => atom!("keydown"),
+                                          KeyState::Released => atom!("keyup"),
+                                      });
 
         let props = KeyboardEvent::key_properties(key, modifiers);
 
@@ -945,7 +944,7 @@ impl Document {
         if state != KeyState::Released && props.is_printable() && !prevented {
             // https://dvcs.w3.org/hg/dom3events/raw-file/tip/html/DOM3-Events.html#keypress-event-order
             let event = KeyboardEvent::new(&self.window,
-                                           DOMString::from("keypress"),
+                                           DOMString::from(atom!("keypress")),
                                            true,
                                            true,
                                            Some(&self.window),
@@ -1297,7 +1296,7 @@ impl Document {
         update_with_current_time(&self.dom_content_loaded_event_start);
 
         let event = Event::new(GlobalRef::Window(self.window()),
-                               DOMString::from("DOMContentLoaded"),
+                               DOMString::from(atom!("DOMContentLoaded")),
                                EventBubbles::DoesNotBubble,
                                EventCancelable::NotCancelable);
         let doctarget = self.upcast::<EventTarget>();
@@ -1427,7 +1426,7 @@ impl Document {
             // https://dom.spec.whatwg.org/#concept-document-quirks
             quirks_mode: Cell::new(NoQuirks),
             // https://dom.spec.whatwg.org/#concept-document-encoding
-            encoding_name: DOMRefCell::new(DOMString::from("UTF-8")),
+            encoding_name: DOMRefCell::new(DOMString::from(atom!("UTF-8"))),
             is_html_document: is_html_document == IsHTMLDocument::HTMLDocument,
             id_map: DOMRefCell::new(HashMap::new()),
             tag_map: DOMRefCell::new(HashMap::new()),
@@ -2255,7 +2254,7 @@ impl DocumentMethods for Document {
         let (tx, rx) = ipc::channel().unwrap();
         let _ = self.window.resource_task().send(GetCookiesForUrl((*url).clone(), tx, NonHTTP));
         let cookies = rx.recv().unwrap();
-        Ok(cookies.map(DOMString::from).unwrap_or(DOMString::from("")))
+        Ok(cookies.map(DOMString::from).unwrap_or(DOMString::new()))
     }
 
     // https://html.spec.whatwg.org/multipage/#dom-document-cookie
@@ -2426,7 +2425,7 @@ impl DocumentProgressHandler {
         let document = self.addr.root();
         let window = document.window();
         let event = Event::new(GlobalRef::Window(window),
-                               DOMString::from("load"),
+                               DOMString::from(atom!("load")),
                                EventBubbles::DoesNotBubble,
                                EventCancelable::NotCancelable);
         let wintarget = window.upcast::<EventTarget>();
@@ -2439,7 +2438,7 @@ impl DocumentProgressHandler {
         if let Some(frame_element) = browsing_context.frame_element() {
             let frame_window = window_from_node(frame_element);
             let event = Event::new(GlobalRef::Window(frame_window.r()),
-                                   DOMString::from("load"),
+                                   DOMString::from(atom!("load")),
                                    EventBubbles::DoesNotBubble,
                                    EventCancelable::NotCancelable);
             event.fire(frame_element.upcast());

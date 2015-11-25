@@ -746,7 +746,7 @@ impl XMLHttpRequest {
         self.ready_state.set(rs);
         let global = self.global.root();
         let event = Event::new(global.r(),
-                               DOMString::from("readystatechange"),
+                               DOMString::from(atom!("readystatechange")),
                                EventBubbles::DoesNotBubble,
                                EventCancelable::Cancelable);
         event.fire(self.upcast());

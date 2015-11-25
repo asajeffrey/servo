@@ -89,8 +89,7 @@ impl Attr {
 impl AttrMethods for Attr {
     // https://dom.spec.whatwg.org/#dom-attr-localname
     fn LocalName(&self) -> DOMString {
-        // FIXME(ajeffrey): convert directly from Atom to DOMString
-        DOMString::from(&**self.local_name())
+        DOMString::from(self.local_name().clone())
     }
 
     // https://dom.spec.whatwg.org/#dom-attr-value
@@ -134,23 +133,20 @@ impl AttrMethods for Attr {
 
     // https://dom.spec.whatwg.org/#dom-attr-name
     fn Name(&self) -> DOMString {
-        // FIXME(ajeffrey): convert directly from Atom to DOMString
-        DOMString::from(&*self.identifier.name)
+        DOMString::from(self.identifier.name.clone())
     }
 
     // https://dom.spec.whatwg.org/#dom-attr-namespaceuri
     fn GetNamespaceURI(&self) -> Option<DOMString> {
-        let Namespace(ref atom) = self.identifier.namespace;
-        match &**atom {
-            "" => None,
-            url => Some(DOMString::from(url)),
+        match self.identifier.namespace {
+            Namespace(atom!("")) => None,
+            Namespace(ref atom) => Some(DOMString::from(atom.clone()))
         }
     }
 
     // https://dom.spec.whatwg.org/#dom-attr-prefix
     fn GetPrefix(&self) -> Option<DOMString> {
-        // FIXME(ajeffrey): convert directly from Atom to DOMString
-        self.prefix().as_ref().map(|p| DOMString::from(&**p))
+        self.prefix().clone().map(DOMString::from)
     }
 
     // https://dom.spec.whatwg.org/#dom-attr-ownerelement
