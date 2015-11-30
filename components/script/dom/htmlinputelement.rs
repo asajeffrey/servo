@@ -446,7 +446,7 @@ impl HTMLInputElement {
             }
         }
         Some(FormDatum {
-            ty: DOMString::from(&*ty), // FIXME(ajeffrey): Convert directly from Atoms to DOMStrings
+            ty: DOMString::from(ty),
             name: name,
             value: value
         })

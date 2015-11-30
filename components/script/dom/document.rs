@@ -1704,13 +1704,15 @@ impl DocumentMethods for Document {
 
     // https://dom.spec.whatwg.org/#dom-document-getelementsbytagname
     fn GetElementsByTagName(&self, tag_name: DOMString) -> Root<HTMLCollection> {
+        // FIXME(ajeffrey): using Atom::from(&str) here because of lowercasing
         let tag_atom = Atom::from(&*tag_name);
         match self.tag_map.borrow_mut().entry(tag_atom.clone()) {
             Occupied(entry) => Root::from_ref(entry.get()),
             Vacant(entry) => {
+                // FIXME(ajeffrey): better lower-casing of atoms
                 let mut tag_copy = tag_name;
                 tag_copy.make_ascii_lowercase();
-                let ascii_lower_tag = Atom::from(&*tag_copy);
+                let ascii_lower_tag = Atom::from(tag_copy);
                 let result = HTMLCollection::by_atomic_tag_name(&self.window,
                                                                 self.upcast(),
                                                                 tag_atom,
@@ -1727,7 +1729,7 @@ impl DocumentMethods for Document {
                               tag_name: DOMString)
                               -> Root<HTMLCollection> {
         let ns = namespace_from_domstring(maybe_ns);
-        let local = Atom::from(&*tag_name);
+        let local = Atom::from(tag_name);
         let qname = QualName::new(ns, local);
         match self.tagns_map.borrow_mut().entry(qname.clone()) {
             Occupied(entry) => Root::from_ref(entry.get()),
@@ -1758,7 +1760,7 @@ impl DocumentMethods for Document {
 
     // https://dom.spec.whatwg.org/#dom-nonelementparentnode-getelementbyid
     fn GetElementById(&self, id: DOMString) -> Option<Root<Element>> {
-        self.get_element_by_id(&Atom::from(&*id))
+        self.get_element_by_id(&Atom::from(id))
     }
 
     // https://dom.spec.whatwg.org/#dom-document-createelement
@@ -1770,7 +1772,7 @@ impl DocumentMethods for Document {
         if self.is_html_document {
             local_name.make_ascii_lowercase();
         }
-        let name = QualName::new(ns!(html), Atom::from(&*local_name));
+        let name = QualName::new(ns!(html), Atom::from(local_name));
         Ok(Element::create(name, None, self, ElementCreator::ScriptCreated))
     }
 
@@ -1792,9 +1794,8 @@ impl DocumentMethods for Document {
             return Err(Error::InvalidCharacter);
         }
 
-        let name = Atom::from(&*local_name);
-        // repetition used because string_cache::atom::Atom is non-copyable
-        let l_name = Atom::from(&*local_name);
+        let name = Atom::from(local_name);
+        let l_name = name.clone();
         let value = AttrValue::String(DOMString::new());
 
         Ok(Attr::new(&self.window, name, value, l_name, ns!(), None, None))
@@ -1808,7 +1809,7 @@ impl DocumentMethods for Document {
         let (namespace, prefix, local_name) = try!(validate_and_extract(namespace,
                                                                         &qualified_name));
         let value = AttrValue::String(DOMString::new());
-        let qualified_name = Atom::from(&*qualified_name);
+        let qualified_name = Atom::from(qualified_name);
         Ok(Attr::new(&self.window,
                      local_name,
                      value,
@@ -2338,7 +2339,7 @@ impl DocumentMethods for Document {
                 _ => false,
             }
         }
-        let name = Atom::from(&*name);
+        let name = Atom::from(name);
         let root = self.upcast::<Node>();
         {
             // Step 1.

@@ -63,8 +63,7 @@ impl DOMTokenListMethods for DOMTokenList {
     // https://dom.spec.whatwg.org/#dom-domtokenlist-item
     fn Item(&self, index: u32) -> Option<DOMString> {
         self.attribute().and_then(|attr| {
-            // FIXME(ajeffrey): Convert directly from Atom to DOMString
-            attr.value().as_tokens().get(index as usize).map(|token| DOMString::from(&**token))
+            attr.value().as_tokens().get(index as usize).map(Atom::clone).map(DOMString::from)
         })
     }
 

@@ -1630,7 +1630,7 @@ impl Node {
                     local: element.local_name().clone()
                 };
                 let element = Element::create(name,
-                    element.prefix().as_ref().map(|p| Atom::from(&**p)),
+                    element.prefix().as_ref().map(Atom::from),
                     document.r(), ElementCreator::ScriptCreated);
                 Root::upcast::<Node>(element)
             },
@@ -1707,8 +1707,7 @@ impl Node {
     pub fn namespace_to_string(namespace: Namespace) -> Option<DOMString> {
         match namespace {
             ns!() => None,
-            // FIXME(ajeffrey): convert directly from &Atom to DOMString
-            Namespace(ref ns) => Some(DOMString::from(&**ns))
+            Namespace(ref ns) => Some(DOMString::from(ns.clone()))
         }
     }
 
@@ -1734,8 +1733,7 @@ impl Node {
                     return element.namespace().clone()
                 }
 
-                // FIXME(ajeffrey): directly convert DOMString to Atom
-                let prefix_atom = prefix.as_ref().map(|s| Atom::from(&**s));
+                let prefix_atom = prefix.as_ref().map(Atom::from);
 
                 // Step 2.
                 let attrs = element.attrs();

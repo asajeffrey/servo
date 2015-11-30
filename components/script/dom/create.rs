@@ -84,19 +84,19 @@ pub fn create_element(name: QualName,
                       -> Root<Element> {
     // FIXME(ajeffrey): Convert directly from Atom to DOMString.
 
-    let prefix = prefix.map(|p| DOMString::from(&*p));
+    let prefix = prefix.map(DOMString::from);
 
     if name.ns != ns!(html) {
-        return Element::new(DOMString::from(&*name.local), name.ns, prefix, document);
+        return Element::new(DOMString::from(name.local), name.ns, prefix, document);
     }
 
     macro_rules! make(
         ($ctor:ident) => ({
-            let obj = $ctor::new(DOMString::from(&*name.local), prefix, document);
+            let obj = $ctor::new(DOMString::from(name.local), prefix, document);
             Root::upcast(obj)
         });
         ($ctor:ident, $($arg:expr),+) => ({
-            let obj = $ctor::new(DOMString::from(&*name.local), prefix, document, $($arg),+);
+            let obj = $ctor::new(DOMString::from(name.local), prefix, document, $($arg),+);
             Root::upcast(obj)
         })
     );

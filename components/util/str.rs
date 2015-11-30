@@ -238,6 +238,28 @@ impl Into<String> for UnpackedDOMString {
     }
 }
 
+impl Into<Atom> for UnpackedDOMString {
+    // FIXME(ajeffrey): think about (unsafely!) updating self to be Atomic
+    fn into(self) -> Atom {
+        match self {
+            UnpackedDOMString::OnHeap(this) => Atom::from(&*this),
+            UnpackedDOMString::InPlace(this) => Atom::from(this.as_str()),
+            UnpackedDOMString::Atomic(this) => this,
+        }
+    }
+}
+
+impl<'a> Into<Atom> for &'a UnpackedDOMString {
+    // FIXME(ajeffrey): think about (unsafely!) updating self to be Atomic
+    fn into(self) -> Atom {
+        match *self {
+            UnpackedDOMString::OnHeap(ref this) => Atom::from(&**this),
+            UnpackedDOMString::InPlace(ref this) => Atom::from(this.as_str()),
+            UnpackedDOMString::Atomic(ref this) => this.clone(),
+        }
+    }
+}
+
 impl Extend<char> for UnpackedDOMString {
     fn extend<I>(&mut self, iterable: I) where I: IntoIterator<Item=char> {
         if let UnpackedDOMString::OnHeap(ref mut this) = *self {
@@ -333,6 +355,18 @@ impl From<Atom> for DOMString {
 impl From<DOMString> for String {
     fn from(contents: DOMString) -> String {
         contents.0.into()
+    }
+}
+
+impl From<DOMString> for Atom {
+    fn from(contents: DOMString) -> Atom {
+        contents.0.into()
+    }
+}
+
+impl<'a> From<&'a DOMString> for Atom {
+    fn from(contents: &DOMString) -> Atom {
+        (&contents.0).into()
     }
 }
 

@@ -65,7 +65,7 @@ impl AttrValue {
 
     pub fn from_atomic(string: DOMString) -> AttrValue {
         // FIXME(ajeffrey): convert directly from DOMString to Atom
-        let value = Atom::from(&*string);
+        let value = Atom::from(string);
         AttrValue::Atom(value)
     }
 
