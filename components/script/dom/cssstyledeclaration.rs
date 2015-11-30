@@ -146,7 +146,7 @@ impl CSSStyleDeclarationMethods for CSSStyleDeclaration {
 
         // Step 1
         property.make_ascii_lowercase();
-        let property = Atom::from(&*property);
+        let property = Atom::from(property);
 
         if self.readonly {
             // Readonly style declarations are used for getComputedStyle.
@@ -186,7 +186,7 @@ impl CSSStyleDeclarationMethods for CSSStyleDeclaration {
     fn GetPropertyPriority(&self, mut property: DOMString) -> DOMString {
         // Step 1
         property.make_ascii_lowercase();
-        let property = Atom::from(&*property);
+        let property = Atom::from(property);
 
         // Step 2
         if let Some(shorthand) = Shorthand::from_name(&property) {

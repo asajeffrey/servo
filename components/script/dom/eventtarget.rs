@@ -340,7 +340,7 @@ impl EventTargetMethods for EventTarget {
         match listener {
             Some(listener) => {
                 let mut handlers = self.handlers.borrow_mut();
-                let entry = match handlers.entry(Atom::from(&*ty)) {
+                let entry = match handlers.entry(Atom::from(ty)) {
                     Occupied(entry) => entry.into_mut(),
                     Vacant(entry) => entry.insert(vec!()),
                 };
@@ -366,7 +366,7 @@ impl EventTargetMethods for EventTarget {
         match listener {
             Some(ref listener) => {
                 let mut handlers = self.handlers.borrow_mut();
-                let entry = handlers.get_mut(&Atom::from(&*ty));
+                let entry = handlers.get_mut(&Atom::from(ty));
                 for entry in entry {
                     let phase = if capture { ListenerPhase::Capturing } else { ListenerPhase::Bubbling };
                     let old_entry = EventListenerEntry {

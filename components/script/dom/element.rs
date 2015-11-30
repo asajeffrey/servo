@@ -605,7 +605,7 @@ impl Element {
         if self.html_element_in_html_document() {
             name.make_ascii_lowercase();
         }
-        Atom::from(&*name)
+        Atom::from(name)
     }
 
     pub fn namespace(&self) -> &Namespace {
@@ -930,7 +930,7 @@ impl Element {
         }
 
         // Steps 2-5.
-        let name = Atom::from(&*name);
+        let name = Atom::from(name);
         let value = self.parse_attribute(&ns!(), &name, value);
         self.set_first_matching_attribute(name.clone(),
                                           value,
@@ -1148,8 +1148,7 @@ impl ElementMethods for Element {
 
     // https://dom.spec.whatwg.org/#dom-element-localname
     fn LocalName(&self) -> DOMString {
-        // FIXME(ajeffrey): Convert directly from Atom to DOMString
-        DOMString::from(&*self.local_name)
+        DOMString::from(self.local_name.clone())
     }
 
     // https://dom.spec.whatwg.org/#dom-element-prefix
@@ -1228,7 +1227,7 @@ impl ElementMethods for Element {
                           local_name: DOMString)
                           -> Option<Root<Attr>> {
         let namespace = &namespace_from_domstring(namespace);
-        self.get_attribute(namespace, &Atom::from(&*local_name))
+        self.get_attribute(namespace, &Atom::from(local_name))
     }
 
     // https://dom.spec.whatwg.org/#dom-element-setattribute
@@ -1256,7 +1255,7 @@ impl ElementMethods for Element {
                       value: DOMString) -> ErrorResult {
         let (namespace, prefix, local_name) =
             try!(validate_and_extract(namespace, &qualified_name));
-        let qualified_name = Atom::from(&*qualified_name);
+        let qualified_name = Atom::from(qualified_name);
         let value = self.parse_attribute(&namespace, &local_name, value);
         self.set_first_matching_attribute(
             local_name.clone(), value, qualified_name, namespace.clone(), prefix,
@@ -1273,7 +1272,7 @@ impl ElementMethods for Element {
     // https://dom.spec.whatwg.org/#dom-element-removeattributens
     fn RemoveAttributeNS(&self, namespace: Option<DOMString>, local_name: DOMString) {
         let namespace = namespace_from_domstring(namespace);
-        let local_name = Atom::from(&*local_name);
+        let local_name = Atom::from(local_name);
         self.remove_attribute(&namespace, &local_name);
     }
 

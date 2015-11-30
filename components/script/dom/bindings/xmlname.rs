@@ -172,6 +172,6 @@ pub fn xml_name_type(name: &str) -> XMLName {
 pub fn namespace_from_domstring(url: Option<DOMString>) -> Namespace {
     match url {
         None => ns!(),
-        Some(s) => Namespace(Atom::from(&*s)), // FIXME(ajeffrey): directly convert DOMString to Atom
+        Some(s) => Namespace(Atom::from(s)),
     }
 }

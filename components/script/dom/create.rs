@@ -84,7 +84,7 @@ pub fn create_element(name: QualName,
                       -> Root<Element> {
     // FIXME(ajeffrey): Convert directly from Atom to DOMString.
 
-    let prefix = prefix.map(|p| DOMString::from(&*p));
+    let prefix = prefix.map(DOMString::from);
 
     if name.ns != ns!(html) {
         return Element::new(name.local, name.ns, prefix, document);

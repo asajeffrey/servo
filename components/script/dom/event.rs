@@ -168,7 +168,7 @@ impl EventMethods for Event {
 
     // https://dom.spec.whatwg.org/#dom-event-type
     fn Type(&self) -> DOMString {
-        DOMString::from(&*self.type_()) // FIXME(ajeffrey): Directly convert from Atom to DOMString
+        DOMString::from(self.type_())
     }
 
     // https://dom.spec.whatwg.org/#dom-event-target
@@ -234,7 +234,7 @@ impl EventMethods for Event {
         self.canceled.set(false);
         self.trusted.set(false);
         self.target.set(None);
-        *self.type_.borrow_mut() = Atom::from(&*type_);
+        *self.type_.borrow_mut() = Atom::from(type_);
         self.bubbles.set(bubbles);
         self.cancelable.set(cancelable);
     }
