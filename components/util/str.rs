@@ -4,6 +4,7 @@
 
 use app_units::Au;
 use cssparser::{self, Color, RGBA};
+use inlinable_string::{InlinableString, StringExt};
 use js::conversions::{FromJSValConvertible, ToJSValConvertible, latin1_to_string};
 use js::jsapi::{JSContext, JSString, HandleValue, MutableHandleValue};
 use js::jsapi::{JS_GetTwoByteStringCharsAndLength, JS_StringHasLatin1Chars};
@@ -11,6 +12,7 @@ use js::rust::ToString;
 use libc::c_char;
 use num_lib::ToPrimitive;
 use opts;
+use serde;
 use std::ascii::AsciiExt;
 use std::borrow::ToOwned;
 use std::char;
@@ -23,14 +25,31 @@ use std::ptr;
 use std::slice;
 use std::str::{CharIndices, FromStr, Split, from_utf8};
 
-#[derive(Clone, PartialOrd, Ord, PartialEq, Eq, Deserialize, Serialize, Hash, Debug)]
-pub struct DOMString(String);
+#[derive(Clone, PartialOrd, Ord, PartialEq, Eq, Hash, Debug)]
+pub struct DOMString(InlinableString);
+
+impl serde::Deserialize for DOMString {
+    fn deserialize<D>(deserializer: &mut D) -> Result<Self, D::Error>
+        where D: serde::Deserializer
+    {
+        let string: String = try!(serde::Deserialize::deserialize(deserializer));
+        Ok(DOMString::from(string))
+    }
+}
+
+impl serde::Serialize for DOMString {
+    fn serialize<S>(&self, serializer: &mut S) -> Result<(), S::Error>
+        where S: serde::Serializer
+    {
+        (&**self).serialize(serializer)
+    }
+}
 
 impl !Send for DOMString {}
 
 impl DOMString {
     pub fn new() -> DOMString {
-        DOMString(String::new())
+        DOMString(InlinableString::new())
     }
     // FIXME(ajeffrey): implement more of the String methods on DOMString?
     pub fn push_str(&mut self, string: &str) {
@@ -43,7 +62,7 @@ impl DOMString {
 
 impl Default for DOMString {
     fn default() -> Self {
-        DOMString(String::new())
+        DOMString(InlinableString::new())
     }
 }
 
@@ -90,25 +109,25 @@ impl<'a> PartialEq<&'a str> for DOMString {
 
 impl From<String> for DOMString {
     fn from(contents: String) -> DOMString {
-        DOMString(contents)
+        DOMString(InlinableString::from(&*contents))
     }
 }
 
 impl<'a> From<&'a str> for DOMString {
     fn from(contents: &str) -> DOMString {
-        DOMString::from(String::from(contents))
+        DOMString(InlinableString::from(contents))
     }
 }
 
 impl From<DOMString> for String {
     fn from(contents: DOMString) -> String {
-        contents.0
+        String::from(&*contents.0)
     }
 }
 
 impl Into<Vec<u8>> for DOMString {
     fn into(self) -> Vec<u8> {
-        self.0.into()
+        self.0.into_bytes()
     }
 }
 
@@ -133,13 +152,13 @@ pub enum StringificationBehavior {
 pub unsafe fn jsstring_to_str(cx: *mut JSContext, s: *mut JSString) -> DOMString {
     let latin1 = JS_StringHasLatin1Chars(s);
     DOMString(if latin1 {
-        latin1_to_string(cx, s)
+        InlinableString::from_utf8_unchecked(latin1_to_string(cx, s).into_bytes())
     } else {
         let mut length = 0;
         let chars = JS_GetTwoByteStringCharsAndLength(cx, ptr::null(), s, &mut length);
         assert!(!chars.is_null());
         let potentially_ill_formed_utf16 = slice::from_raw_parts(chars, length as usize);
-        let mut s = String::with_capacity(length as usize);
+        let mut s = InlinableString::with_capacity(length as usize);
         for item in char::decode_utf16(potentially_ill_formed_utf16.iter().cloned()) {
             match item {
                 Ok(c) => s.push(c),
@@ -466,7 +485,7 @@ pub fn parse_legacy_color(mut input: &str) -> Result<RGBA, ()> {
     }
 
     // Step 7.
-    let mut new_input = String::new();
+    let mut new_input = InlinableString::new();
     for ch in input.chars() {
         if ch as u32 > 0xffff {
             new_input.push_str("00")

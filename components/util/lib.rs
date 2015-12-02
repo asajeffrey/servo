@@ -31,6 +31,7 @@ extern crate euclid;
 extern crate getopts;
 extern crate html5ever;
 extern crate hyper;
+extern crate inlinable_string;
 extern crate ipc_channel;
 extern crate js;
 extern crate layers;
