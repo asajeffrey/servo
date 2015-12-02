@@ -159,16 +159,12 @@ impl HTMLCollection {
         }
     }
 
-    pub fn by_tag_name(window: &Window, root: &Node, mut tag: DOMString)
+    pub fn by_tag_name(window: &Window, root: &Node, tag: DOMString)
                        -> Root<HTMLCollection> {
-        // FIXME(ajeffrey): better lowercasing of atoms
-        let tag_atom = Atom::from(&*tag);
-        tag.make_ascii_lowercase();
-        let ascii_lower_tag = Atom::from(tag);
-        HTMLCollection::by_atomic_tag_name(window, root, tag_atom, ascii_lower_tag)
+        HTMLCollection::by_atomic_tag_name(window, root, Atom::from(tag))
     }
 
-    pub fn by_atomic_tag_name(window: &Window, root: &Node, tag_atom: Atom, ascii_lower_tag: Atom)
+    pub fn by_atomic_tag_name(window: &Window, root: &Node, tag_atom: Atom)
                        -> Root<HTMLCollection> {
         #[derive(JSTraceable, HeapSizeOf)]
         struct TagNameFilter {
@@ -186,6 +182,7 @@ impl HTMLCollection {
                 }
             }
         }
+        let ascii_lower_tag = tag_atom.to_ascii_lowercase();
         let filter = TagNameFilter {
             tag: tag_atom,
             ascii_lower_tag: ascii_lower_tag,

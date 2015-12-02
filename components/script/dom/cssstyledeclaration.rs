@@ -107,46 +107,13 @@ impl CSSStyleDeclaration {
         let addr = node.to_trusted_node_address();
         window_from_node(&*self.owner).resolved_style_query(addr, self.pseudo.clone(), property)
     }
-}
-
-impl CSSStyleDeclarationMethods for CSSStyleDeclaration {
-    // https://dev.w3.org/csswg/cssom/#dom-cssstyledeclaration-length
-    fn Length(&self) -> u32 {
-        let elem = self.owner.upcast::<Element>();
-        let len = match *elem.style_attribute().borrow() {
-            Some(ref declarations) => declarations.normal.len() + declarations.important.len(),
-            None => 0,
-        };
-        len as u32
-    }
-
-    // https://dev.w3.org/csswg/cssom/#dom-cssstyledeclaration-item
-    fn Item(&self, index: u32) -> DOMString {
-        let index = index as usize;
-        let elem = self.owner.upcast::<Element>();
-        let style_attribute = elem.style_attribute().borrow();
-        let result = style_attribute.as_ref().and_then(|declarations| {
-            if index > declarations.normal.len() {
-                declarations.important
-                            .get(index - declarations.normal.len())
-                            .map(|decl| format!("{:?} !important", decl))
-            } else {
-                declarations.normal
-                            .get(index)
-                            .map(|decl| format!("{:?}", decl))
-            }
-        });
-
-        result.map(DOMString::from).unwrap_or(DOMString::new())
-    }
 
     // https://dev.w3.org/csswg/cssom/#dom-cssstyledeclaration-getpropertyvalue
-    fn GetPropertyValue(&self, mut property: DOMString) -> DOMString {
+    fn get_property_value(&self, property: &Atom) -> DOMString {
         let owner = &self.owner;
 
         // Step 1
-        property.make_ascii_lowercase();
-        let property = Atom::from(property);
+        assert!(*property == property.to_ascii_lowercase());
 
         if self.readonly {
             // Readonly style declarations are used for getComputedStyle.
@@ -182,11 +149,78 @@ impl CSSStyleDeclarationMethods for CSSStyleDeclaration {
         result
     }
 
-    // https://dev.w3.org/csswg/cssom/#dom-cssstyledeclaration-getpropertypriority
-    fn GetPropertyPriority(&self, mut property: DOMString) -> DOMString {
+    // https://dev.w3.org/csswg/cssom/#dom-cssstyledeclaration-removeproperty
+    fn remove_property(&self, property: &Atom) -> Fallible<DOMString> {
         // Step 1
-        property.make_ascii_lowercase();
-        let property = Atom::from(property);
+        if self.readonly {
+            return Err(Error::NoModificationAllowed);
+        }
+
+        // Step 2
+        assert!(*property == property.to_ascii_lowercase());
+
+        // Step 3
+        let value = self.get_property_value(&property);
+
+        let elem = self.owner.upcast::<Element>();
+
+        match Shorthand::from_name(&property) {
+            // Step 4
+            Some(shorthand) => {
+                for longhand in shorthand.longhands() {
+                    elem.remove_inline_style_property(longhand)
+                }
+            }
+            // Step 5
+            None => elem.remove_inline_style_property(&property),
+        }
+
+        // Step 6
+        Ok(value)
+    }
+
+}
+
+impl CSSStyleDeclarationMethods for CSSStyleDeclaration {
+    // https://dev.w3.org/csswg/cssom/#dom-cssstyledeclaration-length
+    fn Length(&self) -> u32 {
+        let elem = self.owner.upcast::<Element>();
+        let len = match *elem.style_attribute().borrow() {
+            Some(ref declarations) => declarations.normal.len() + declarations.important.len(),
+            None => 0,
+        };
+        len as u32
+    }
+
+    // https://dev.w3.org/csswg/cssom/#dom-cssstyledeclaration-item
+    fn Item(&self, index: u32) -> DOMString {
+        let index = index as usize;
+        let elem = self.owner.upcast::<Element>();
+        let style_attribute = elem.style_attribute().borrow();
+        let result = style_attribute.as_ref().and_then(|declarations| {
+            if index > declarations.normal.len() {
+                declarations.important
+                            .get(index - declarations.normal.len())
+                            .map(|decl| format!("{:?} !important", decl))
+            } else {
+                declarations.normal
+                            .get(index)
+                            .map(|decl| format!("{:?}", decl))
+            }
+        });
+
+        result.map(DOMString::from).unwrap_or(DOMString::new())
+    }
+
+    // https://dev.w3.org/csswg/cssom/#dom-cssstyledeclaration-getpropertyvalue
+    fn GetPropertyValue(&self, property: DOMString) -> DOMString {
+        self.get_property_value(&Atom::from(property).to_ascii_lowercase())
+    }
+
+    // https://dev.w3.org/csswg/cssom/#dom-cssstyledeclaration-getpropertypriority
+    fn GetPropertyPriority(&self, property: DOMString) -> DOMString {
+        // Step 1
+        let property = Atom::from(property).to_ascii_lowercase();
 
         // Step 2
         if let Some(shorthand) = Shorthand::from_name(&property) {
@@ -210,7 +244,7 @@ impl CSSStyleDeclarationMethods for CSSStyleDeclaration {
 
     // https://dev.w3.org/csswg/cssom/#dom-cssstyledeclaration-setproperty
     fn SetProperty(&self,
-                   mut property: DOMString,
+                   property: DOMString,
                    value: DOMString,
                    priority: DOMString)
                    -> ErrorResult {
@@ -220,7 +254,7 @@ impl CSSStyleDeclarationMethods for CSSStyleDeclaration {
         }
 
         // Step 2
-        property.make_ascii_lowercase();
+        let property = Atom::from(property).to_ascii_lowercase();
 
         // Step 3
         if !is_supported_property(&property) {
@@ -229,7 +263,7 @@ impl CSSStyleDeclarationMethods for CSSStyleDeclaration {
 
         // Step 4
         if value.is_empty() {
-            return self.RemoveProperty(property).map(|_| ());
+            return self.remove_property(&property).map(|_| ());
         }
 
         // Step 5
@@ -305,33 +339,8 @@ impl CSSStyleDeclarationMethods for CSSStyleDeclaration {
     }
 
     // https://dev.w3.org/csswg/cssom/#dom-cssstyledeclaration-removeproperty
-    fn RemoveProperty(&self, mut property: DOMString) -> Fallible<DOMString> {
-        // Step 1
-        if self.readonly {
-            return Err(Error::NoModificationAllowed);
-        }
-
-        // Step 2
-        property.make_ascii_lowercase();
-
-        // Step 3
-        let value = self.GetPropertyValue(property.clone());
-
-        let elem = self.owner.upcast::<Element>();
-
-        match Shorthand::from_name(&property) {
-            // Step 4
-            Some(shorthand) => {
-                for longhand in shorthand.longhands() {
-                    elem.remove_inline_style_property(longhand)
-                }
-            }
-            // Step 5
-            None => elem.remove_inline_style_property(&property),
-        }
-
-        // Step 6
-        Ok(value)
+    fn RemoveProperty(&self, property: DOMString) -> Fallible<DOMString> {
+        self.remove_property(&Atom::from(property).to_ascii_lowercase())
     }
 
     // https://dev.w3.org/csswg/cssom/#dom-cssstyledeclaration-cssfloat

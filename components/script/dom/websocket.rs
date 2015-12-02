@@ -602,7 +602,7 @@ impl Runnable for MessageReceivedTask {
                 MessageData::Binary(data) => {
                     match ws.binary_type.get() {
                         BinaryType::Blob => {
-                            let blob = Blob::new(global.r(), Some(data), "");
+                            let blob = Blob::new(global.r(), Some(data), atom!(""));
                             blob.to_jsval(cx, message.handle_mut());
                         }
                         BinaryType::Arraybuffer => {

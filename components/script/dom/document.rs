@@ -1733,19 +1733,13 @@ impl DocumentMethods for Document {
 
     // https://dom.spec.whatwg.org/#dom-document-getelementsbytagname
     fn GetElementsByTagName(&self, tag_name: DOMString) -> Root<HTMLCollection> {
-        // FIXME(ajeffrey): using Atom::from(&str) here because of lowercasing
-        let tag_atom = Atom::from(&*tag_name);
+        let tag_atom = Atom::from(tag_name);
         match self.tag_map.borrow_mut().entry(tag_atom.clone()) {
             Occupied(entry) => Root::from_ref(entry.get()),
             Vacant(entry) => {
-                // FIXME(ajeffrey): better lower-casing of atoms
-                let mut tag_copy = tag_name;
-                tag_copy.make_ascii_lowercase();
-                let ascii_lower_tag = Atom::from(tag_copy);
                 let result = HTMLCollection::by_atomic_tag_name(&self.window,
                                                                 self.upcast(),
-                                                                tag_atom,
-                                                                ascii_lower_tag);
+                                                                tag_atom);
                 entry.insert(JS::from_rooted(&result));
                 result
             }
@@ -1793,15 +1787,17 @@ impl DocumentMethods for Document {
     }
 
     // https://dom.spec.whatwg.org/#dom-document-createelement
-    fn CreateElement(&self, mut local_name: DOMString) -> Fallible<Root<Element>> {
+    fn CreateElement(&self, local_name: DOMString) -> Fallible<Root<Element>> {
         if xml_name_type(&local_name) == InvalidXMLName {
             debug!("Not a valid element name");
             return Err(Error::InvalidCharacter);
         }
-        if self.is_html_document {
-            local_name.make_ascii_lowercase();
-        }
-        let name = QualName::new(ns!(html), Atom::from(local_name));
+        let local_name = if self.is_html_document {
+            Atom::from(local_name).to_ascii_lowercase()
+        } else {
+            Atom::from(local_name)
+        };
+        let name = QualName::new(ns!(html), local_name);
         Ok(Element::create(name, None, self, ElementCreator::ScriptCreated))
     }
 
@@ -1913,22 +1909,21 @@ impl DocumentMethods for Document {
     }
 
     // https://dom.spec.whatwg.org/#dom-document-createevent
-    fn CreateEvent(&self, mut interface: DOMString) -> Fallible<Root<Event>> {
-        interface.make_ascii_lowercase();
-        match &*interface {
-            "uievents" | "uievent" =>
+    fn CreateEvent(&self, interface: DOMString) -> Fallible<Root<Event>> {
+        match Atom::from(interface).to_ascii_lowercase() {
+            atom!("uievents") | atom!("uievent") =>
                 Ok(Root::upcast(UIEvent::new_uninitialized(&self.window))),
-            "mouseevents" | "mouseevent" =>
+            atom!("mouseevents") | atom!("mouseevent") =>
                 Ok(Root::upcast(MouseEvent::new_uninitialized(&self.window))),
-            "customevent" =>
+            atom!("customevent") =>
                 Ok(Root::upcast(CustomEvent::new_uninitialized(GlobalRef::Window(&self.window)))),
-            "htmlevents" | "events" | "event" =>
+            atom!("htmlevents") | atom!("events") | atom!("event") =>
                 Ok(Event::new_uninitialized(GlobalRef::Window(&self.window))),
-            "keyboardevent" | "keyevents" =>
+            atom!("keyboardevent") | atom!("keyevents") =>
                 Ok(Root::upcast(KeyboardEvent::new_uninitialized(&self.window))),
-            "messageevent" =>
+            atom!("messageevent") =>
                 Ok(Root::upcast(MessageEvent::new_uninitialized(GlobalRef::Window(&self.window)))),
-            "touchevent" =>
+            atom!("touchevent") =>
                 Ok(Root::upcast(
                     TouchEvent::new_uninitialized(&self.window,
                         &TouchList::new(&self.window, &[]),

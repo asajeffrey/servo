@@ -7,6 +7,7 @@ use cssparser::{self, Color, RGBA};
 use js::conversions::{FromJSValConvertible, ToJSValConvertible, latin1_to_string};
 use js::jsapi::{JSContext, JSString, HandleValue, MutableHandleValue};
 use js::jsapi::{JS_GetTwoByteStringCharsAndLength, JS_StringHasLatin1Chars};
+use js::jsval::StringValue;
 use js::rust::ToString;
 use libc::c_char;
 use num_lib::ToPrimitive;
@@ -272,8 +273,9 @@ impl Extend<char> for UnpackedDOMString {
     }
 }
 
-// As an experiment, make a DOMString just its unpacked representation
-#[derive(Clone, PartialOrd, Ord, PartialEq, Eq, Deserialize, Serialize, Hash, Debug)]
+// As an experiment, make a DOMString just its unpacked representation,
+// plus a JSString cache.
+#[derive(Clone)]
 pub struct DOMString(UnpackedDOMString);
 
 impl !Send for DOMString {}
@@ -283,7 +285,53 @@ impl DOMString {
         DOMString(UnpackedDOMString::new())
     }
     pub fn push_str(&mut self, string: &str) {
-        self.0.push_str(string)
+        self.0.push_str(string);
+    }
+}
+
+
+impl PartialEq for DOMString {
+    fn eq(&self, other: &DOMString) -> bool {
+        (&**self).eq(&**other)
+    }
+}
+
+impl Eq for DOMString {}
+
+impl Hash for DOMString {
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        (&**self).hash(state)
+    }
+}
+
+impl PartialOrd for DOMString {
+    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+        (&**self).partial_cmp(&**other)
+    }
+}
+
+impl Ord for DOMString {
+    fn cmp(&self, other: &Self) -> Ordering {
+        (&**self).cmp(&**other)
+    }
+}
+
+impl fmt::Debug for DOMString {
+    fn fmt(&self, formatter: &mut fmt::Formatter) -> Result<(), fmt::Error> {
+        (&**self).fmt(formatter)
+    }
+}
+
+impl serde::Deserialize for DOMString {
+    fn deserialize<D>(deserializer: &mut D) -> Result<Self, D::Error> where D: serde::Deserializer {
+        let string: String = try!(serde::Deserialize::deserialize(deserializer));
+        Ok(DOMString::from(string))
+    }
+}
+
+impl serde::Serialize for DOMString {
+    fn serialize<S>(&self, serializer: &mut S) -> Result<(), S::Error> where S: serde::Serializer {
+        (&**self).serialize(serializer)
     }
 }
 
@@ -302,12 +350,12 @@ impl Deref for DOMString {
     }
 }
 
-impl DerefMut for DOMString {
-    #[inline]
-    fn deref_mut(&mut self) -> &mut str {
-        &mut *self.0
-    }
-}
+// impl DerefMut for DOMString {
+//     #[inline]
+//     fn deref_mut(&mut self) -> &mut str {
+//         &mut *self.0
+//     }
+// }
 
 impl AsRef<str> for DOMString {
     fn as_ref(&self) -> &str {
@@ -378,14 +426,14 @@ impl Into<Vec<u8>> for DOMString {
 
 impl Extend<char> for DOMString {
     fn extend<I>(&mut self, iterable: I) where I: IntoIterator<Item=char> {
-        self.0.extend(iterable)
+        self.0.extend(iterable);
     }
 }
 
 // https://heycam.github.io/webidl/#es-DOMString
 impl ToJSValConvertible for DOMString {
     unsafe fn to_jsval(&self, cx: *mut JSContext, rval: MutableHandleValue) {
-        (**self).to_jsval(cx, rval);
+        (**self).to_jsval(cx, rval)
     }
 }
 
@@ -403,7 +451,7 @@ pub enum StringificationBehavior {
 pub unsafe fn jsstring_to_str(cx: *mut JSContext, s: *mut JSString) -> DOMString {
     // FIXME(ajeffrey): convert short jsstrings directly to DOMStrings
     let latin1 = JS_StringHasLatin1Chars(s);
-    DOMString::from(if latin1 {
+    let string = if latin1 {
         latin1_to_string(cx, s)
     } else {
         let mut length = 0;
@@ -434,7 +482,8 @@ pub unsafe fn jsstring_to_str(cx: *mut JSContext, s: *mut JSString) -> DOMString
             }
         }
         s
-    })
+    };
+    DOMString(UnpackedDOMString::from(string))
 }
 
 // https://heycam.github.io/webidl/#es-DOMString

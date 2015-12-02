@@ -1811,7 +1811,7 @@ impl NodeMethods for Node {
                 self.downcast::<DocumentType>().unwrap().name().clone()
             },
             NodeTypeId::DocumentFragment => DOMString::from(atom!("#document-fragment")),
-            NodeTypeId::Document => DOMString::from(atom!("#document"))
+            NodeTypeId::Document(_) => DOMString::from(atom!("#document"))
         }
     }
 
