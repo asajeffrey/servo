@@ -73,17 +73,16 @@ macro_rules! make_url_or_base_getter(
 
 #[macro_export]
 macro_rules! make_enumerated_getter(
-    ( $attr:ident, $htmlname:tt, $default:expr, $(($choices: pat))|+) => (
+    ( $attr:ident, $htmlname:tt, $default:expr, $(($choices: tt))|+) => (
         fn $attr(&self) -> DOMString {
             use dom::bindings::inheritance::Castable;
             use dom::element::Element;
             use std::ascii::AsciiExt;
             let element = self.upcast::<Element>();
-            let mut val = element.get_string_attribute(&atom!($htmlname));
-            val.make_ascii_lowercase();
+            let val = Atom::from(element.get_string_attribute(&atom!($htmlname))).to_ascii_lowercase();
             // https://html.spec.whatwg.org/multipage/#attr-fs-method
-            match &*val {
-                $($choices)|+ => val,
+            match val {
+                $(atom!($choices))|+ => DOMString::from(val),
                 _ => DOMString::from($default)
             }
         }

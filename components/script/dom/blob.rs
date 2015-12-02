@@ -15,13 +15,14 @@ use std::cell::Cell;
 use std::cmp::{max, min};
 use std::sync::mpsc::Sender;
 use util::str::DOMString;
+use string_cache::Atom;
 
 // http://dev.w3.org/2006/webapi/FileAPI/#blob
 #[dom_struct]
 pub struct Blob {
     reflector_: Reflector,
     bytes: Option<Vec<u8>>,
-    typeString: String,
+    typeString: Atom,
     global: GlobalField,
     isClosed_: Cell<bool>,
 }
@@ -33,17 +34,17 @@ fn is_ascii_printable(string: &str) -> bool {
 }
 
 impl Blob {
-    pub fn new_inherited(global: GlobalRef, bytes: Option<Vec<u8>>, typeString: &str) -> Blob {
+    pub fn new_inherited(global: GlobalRef, bytes: Option<Vec<u8>>, typeString: Atom) -> Blob {
         Blob {
             reflector_: Reflector::new(),
             bytes: bytes,
-            typeString: typeString.to_owned(),
+            typeString: typeString,
             global: GlobalField::from_rooted(&global),
             isClosed_: Cell::new(false),
         }
     }
 
-    pub fn new(global: GlobalRef, bytes: Option<Vec<u8>>, typeString: &str) -> Root<Blob> {
+    pub fn new(global: GlobalRef, bytes: Option<Vec<u8>>, typeString: Atom) -> Root<Blob> {
         reflect_dom_object(box Blob::new_inherited(global, bytes, typeString),
                            global,
                            BlobBinding::Wrap)
@@ -51,7 +52,7 @@ impl Blob {
 
     // http://dev.w3.org/2006/webapi/FileAPI/#constructorBlob
     pub fn Constructor(global: GlobalRef) -> Fallible<Root<Blob>> {
-        Ok(Blob::new(global, None, ""))
+        Ok(Blob::new(global, None, atom!("")))
     }
 
     // http://dev.w3.org/2006/webapi/FileAPI/#constructorBlob
@@ -63,11 +64,11 @@ impl Blob {
         // FIXME(ajeffrey): convert directly from a DOMString to a Vec<u8>
         let bytes: Option<Vec<u8>> = Some(String::from(blobParts).into_bytes());
         let typeString = if is_ascii_printable(&blobPropertyBag.type_) {
-            &*blobPropertyBag.type_
+            Atom::from(&blobPropertyBag.type_).to_ascii_lowercase()
         } else {
-            ""
+            atom!("")
         };
-        Ok(Blob::new(global, bytes, &typeString.to_ascii_lowercase()))
+        Ok(Blob::new(global, bytes, typeString))
     }
 
     pub fn read_out_buffer(&self, send: Sender<Vec<u8>>) {
@@ -122,26 +123,25 @@ impl BlobMethods for Blob {
             }
         };
         let relativeContentType = match contentType {
-            None => DOMString::new(),
-            Some(mut str) => {
+            None => atom!(""),
+            Some(str) => {
                 if is_ascii_printable(&str) {
-                    str.make_ascii_lowercase();
-                    str
-                } else {
-                    DOMString::new()
+                    Atom::from(str).to_ascii_lowercase()
+                 } else {
+                    atom!("")
                 }
             }
         };
         let span: i64 = max(relativeEnd - relativeStart, 0);
         let global = self.global.root();
         match self.bytes {
-            None => Blob::new(global.r(), None, &relativeContentType),
+            None => Blob::new(global.r(), None, relativeContentType),
             Some(ref vec) => {
                 let start = relativeStart.to_usize().unwrap();
                 let end = (relativeStart + span).to_usize().unwrap();
                 let mut bytes: Vec<u8> = Vec::new();
                 bytes.push_all(&vec[start..end]);
-                Blob::new(global.r(), Some(bytes), &relativeContentType)
+                Blob::new(global.r(), Some(bytes), relativeContentType)
             }
         }
     }

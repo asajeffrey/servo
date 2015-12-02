@@ -601,10 +601,10 @@ impl WindowMethods for Window {
                         element: &Element,
                         pseudo: Option<DOMString>) -> Root<CSSStyleDeclaration> {
         // Steps 1-4.
-        let pseudo = match pseudo.map(|mut s| { s.make_ascii_lowercase(); s }) {
-            Some(ref pseudo) if pseudo == ":before" || pseudo == "::before" =>
+        let pseudo = match pseudo {
+            Some(ref pseudo) if pseudo.eq_ignore_ascii_case(":before") || pseudo.eq_ignore_ascii_case(":before") =>
                 Some(PseudoElement::Before),
-            Some(ref pseudo) if pseudo == ":after" || pseudo == "::after" =>
+            Some(ref pseudo) if pseudo.eq_ignore_ascii_case(":after") || pseudo.eq_ignore_ascii_case("::after") =>
                 Some(PseudoElement::After),
             _ => None
         };
