@@ -16,6 +16,7 @@
 #![feature(reflect_marker)]
 #![feature(step_by)]
 #![feature(step_trait)]
+#![feature(str_utf16)]
 #![feature(zero_one)]
 
 #![plugin(plugins, serde_macros)]

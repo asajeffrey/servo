@@ -5,11 +5,13 @@
 use app_units::Au;
 use cssparser::{self, Color, RGBA};
 use inlinable_string::{InlinableString, StringExt};
+use smallvec::SmallVec;
 use js::conversions::{FromJSValConvertible, ToJSValConvertible, latin1_to_string};
 use js::jsapi::{JSContext, JSString, HandleValue, MutableHandleValue};
-use js::jsapi::{JS_GetTwoByteStringCharsAndLength, JS_StringHasLatin1Chars};
+use js::jsapi::{JS_GetTwoByteStringCharsAndLength, JS_GetLatin1StringCharsAndLength, JS_StringHasLatin1Chars, JS_NewUCStringCopyN};
+use js::jsval::StringValue;
 use js::rust::ToString;
-use libc::c_char;
+use libc::{c_char, size_t};
 use num_lib::ToPrimitive;
 use opts;
 use serde;
@@ -134,7 +136,15 @@ impl Into<Vec<u8>> for DOMString {
 // https://heycam.github.io/webidl/#es-DOMString
 impl ToJSValConvertible for DOMString {
     unsafe fn to_jsval(&self, cx: *mut JSContext, rval: MutableHandleValue) {
-        (**self).to_jsval(cx, rval);
+        let mut string_utf16: SmallVec<[u16;16]> = SmallVec::new();
+        string_utf16.extend(self.utf16_units());
+        let jsstr = JS_NewUCStringCopyN(cx,
+                                        string_utf16.as_ptr(),
+                                        string_utf16.len() as size_t);
+        if jsstr.is_null() {
+            panic!("JS_NewUCStringCopyN failed");
+        }
+        rval.set(StringValue(&*jsstr));
     }
 }
 
@@ -152,7 +162,13 @@ pub enum StringificationBehavior {
 pub unsafe fn jsstring_to_str(cx: *mut JSContext, s: *mut JSString) -> DOMString {
     let latin1 = JS_StringHasLatin1Chars(s);
     DOMString(if latin1 {
-        InlinableString::from_utf8_unchecked(latin1_to_string(cx, s).into_bytes())
+        let mut length = 0;
+        let chars = JS_GetLatin1StringCharsAndLength(cx, ptr::null(), s, &mut length);
+        assert!(!chars.is_null());
+        let chars = slice::from_raw_parts(chars, length as usize).iter().map(|&c| c as char);
+        let mut s = InlinableString::with_capacity(length as usize);
+        s.extend(chars);
+        s
     } else {
         let mut length = 0;
         let chars = JS_GetTwoByteStringCharsAndLength(cx, ptr::null(), s, &mut length);
