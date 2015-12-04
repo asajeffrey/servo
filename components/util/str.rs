@@ -6,7 +6,7 @@ use app_units::Au;
 use cssparser::{self, Color, RGBA};
 use js::conversions::{FromJSValConvertible, ToJSValConvertible, latin1_to_string};
 use js::jsapi::{JSContext, JSString, HandleValue, MutableHandleValue};
-use js::jsapi::{JS_GetTwoByteStringCharsAndLength, JS_StringHasLatin1Chars};
+use js::jsapi::{JS_GetTwoByteStringCharsAndLength, JS_StringHasLatin1Chars, JS_GetLatin1StringCharsAndLength};
 use js::rust::ToString;
 use libc::c_char;
 use num_lib::ToPrimitive;
@@ -18,6 +18,7 @@ use std::convert::AsRef;
 use std::ffi::CStr;
 use std::fmt;
 use std::iter::{Filter, Peekable};
+use std::mem::transmute;
 use std::ops::{Deref, DerefMut};
 use std::ptr;
 use std::slice;
@@ -133,7 +134,17 @@ pub enum StringificationBehavior {
 pub unsafe fn jsstring_to_str(cx: *mut JSContext, s: *mut JSString) -> DOMString {
     let latin1 = JS_StringHasLatin1Chars(s);
     DOMString(if latin1 {
-        latin1_to_string(cx, s)
+        let mut length = 0;
+        let chars = JS_GetLatin1StringCharsAndLength(cx, ptr::null(), s, &mut length);
+        assert!(!chars.is_null());
+        if slice::from_raw_parts(chars, length as usize).iter().all(|&c| c <= 128) {
+            slice::from_raw_parts(chars, length as usize).iter().map(|&c| c as char).collect()
+        } else {
+            // FIXME(ajeffrey): this is unsafe because SM might gc the backing store,
+            // and because Servo might mutate the string,
+            // it's just for timing experiments.
+            String::from_raw_parts(transmute(chars), length, length)
+        }            
     } else {
         let mut length = 0;
         let chars = JS_GetTwoByteStringCharsAndLength(cx, ptr::null(), s, &mut length);
