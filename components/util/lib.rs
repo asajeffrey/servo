@@ -46,6 +46,7 @@ extern crate rustc_serialize;
 extern crate selectors;
 extern crate serde;
 extern crate smallvec;
+#[macro_use]
 extern crate string_cache;
 extern crate url;
 extern crate uuid;
