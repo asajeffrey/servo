@@ -7,43 +7,203 @@ use cssparser::{self, Color, RGBA};
 use js::conversions::{FromJSValConvertible, ToJSValConvertible, latin1_to_string};
 use js::jsapi::{JSContext, JSString, HandleValue, MutableHandleValue};
 use js::jsapi::{JS_GetTwoByteStringCharsAndLength, JS_StringHasLatin1Chars};
+use js::jsval::StringValue;
 use js::rust::ToString;
 use libc::c_char;
 use num_lib::ToPrimitive;
 use opts;
+use serde;
 use std::ascii::AsciiExt;
 use std::borrow::ToOwned;
 use std::char;
+use std::cmp::Ordering;
 use std::convert::AsRef;
 use std::ffi::CStr;
 use std::fmt;
 use std::iter::{Filter, Peekable};
+use std::mem;
 use std::ops::{Deref, DerefMut};
 use std::ptr;
 use std::slice;
-use std::str::{CharIndices, FromStr, Split, from_utf8};
+use std::str::{CharIndices, FromStr, Split, from_utf8, from_utf8_unchecked};
+use std::hash::{Hash, Hasher};
+use string_cache::Atom;
 
-#[derive(Clone, PartialOrd, Ord, PartialEq, Eq, Deserialize, Serialize, Hash, Debug)]
-pub struct DOMString(String);
+// An unpacked DOM String is either a String on the heap,
+// or an atom. Logically, this is the representation
+// of strings, but the unpacked version is 4 words, compared to 3 for a String,
+
+enum UnpackedDOMString<A,B> {
+    Atomic(A),
+    Stringy(B),
+}
+
+// A packed DOMString that is 3 words long. This relies on the fact that the first
+// word in a String is a word-aligned pointer, so cannot be 3 (it can be 1 since that is used as heap::EMPTY).
+// We can use the first word as a flag saying whether the DOMString is a String or an Atom.
+// FIXME(ajeffrey): this relies on DOMString being 192 bits long
+// FIXME(ajeffrey): make Option<DOMString> 3 words long
+
+const ATOM: u64 = 3;
+
+#[unsafe_no_drop_flag]
+#[repr(C)]
+pub struct DOMString {
+    flag: u64,
+    atom: Atom,
+    padding: u64,
+}
+
+#[repr(C)]
+pub struct DOMStringData {
+    flag: u64,
+    atom: Atom,
+    padding: u64,
+}
 
 impl !Send for DOMString {}
 
 impl DOMString {
+    #[inline]
+    fn unpack(self) -> UnpackedDOMString<Atom,String> {
+        if self.flag == ATOM {
+            // A hack to get round the fact that DOMString implements Drop
+            let transmuted: DOMStringData = unsafe { mem::transmute(self) };
+            UnpackedDOMString::Atomic(transmuted.atom)
+        } else {
+            UnpackedDOMString::Stringy(unsafe { mem::transmute(self) })
+        }
+    }
+    #[inline]
+    fn unpack_ref(&self) -> UnpackedDOMString<&Atom,&String> {
+        if self.flag == ATOM {
+            UnpackedDOMString::Atomic(&self.atom)
+        } else {
+            UnpackedDOMString::Stringy(unsafe { mem::transmute(self) })
+        }
+    }
+    #[inline]
+    fn unpack_mut(&mut self) -> UnpackedDOMString<&mut Atom,&mut String> {
+        if self.flag == ATOM {
+            UnpackedDOMString::Atomic(&mut self.atom)
+        } else {
+            UnpackedDOMString::Stringy(unsafe { mem::transmute(self) })
+        }
+    }
+    #[inline]
+    fn pack(unpacked: UnpackedDOMString<Atom,String>) -> DOMString {
+        match unpacked {
+            UnpackedDOMString::Atomic(atom) => DOMString{ flag: ATOM, atom: atom, padding: 0 },
+            UnpackedDOMString::Stringy(string) => unsafe {
+                let result: DOMString = mem::transmute(string);
+                assert!(result.flag != ATOM);
+                result
+            },
+        }
+    }
+    #[inline]
     pub fn new() -> DOMString {
-        DOMString(String::new())
+        DOMString::from(atom!(""))
     }
-    // FIXME(ajeffrey): implement more of the String methods on DOMString?
-    pub fn push_str(&mut self, string: &str) {
-        self.0.push_str(string)
-    }
+    #[inline]
     pub fn clear(&mut self) {
-        self.0.clear()
+        match self.unpack_mut() {
+            UnpackedDOMString::Atomic(atom) => {},
+            UnpackedDOMString::Stringy(string) => { return string.clear(); },
+        }
+        *self = DOMString::new();
+    }
+    #[inline]
+    pub fn push_str(&mut self, contents: &str) {
+        let mut string = match self.unpack_mut() {
+            UnpackedDOMString::Atomic(atom) => String::from(&**atom),
+            UnpackedDOMString::Stringy(string) => { return string.push_str(contents); },
+        };
+        string.push_str(contents);
+        *self = DOMString::from(string);
+    }
+}
+
+impl Clone for DOMString {
+    fn clone(&self) -> DOMString {
+        match self.unpack_ref() {
+            UnpackedDOMString::Atomic(atom) => DOMString::from(atom.clone()),
+            UnpackedDOMString::Stringy(string) => DOMString::from(string.clone()),
+        }
+    }
+}
+
+impl Drop for DOMString {
+    fn drop(&mut self) {
+        if self.flag != 0 {
+            match self.unpack_mut() {
+                UnpackedDOMString::Atomic(atom) => {},
+                UnpackedDOMString::Stringy(string) => {
+                    // We need to make sure that the memory for the string is reclaimed as a String,
+                    // not as a DOMString. We do this by setting the string to be a valid DOMString.
+                    *string = unsafe { mem::transmute(DOMString::from(atom!(""))) };
+                }
+            }
+        }
+    }
+}
+
+impl PartialEq for DOMString {
+    #[inline]
+    fn eq(&self, other: &DOMString) -> bool {
+        (&**self).eq(&**other)
+    }
+}
+
+impl Eq for DOMString {}
+
+impl Hash for DOMString {
+    #[inline]
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        (&**self).hash(state)
+    }
+}
+
+impl PartialOrd for DOMString {
+    #[inline]
+    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+        (&**self).partial_cmp(&**other)
+    }
+}
+
+impl Ord for DOMString {
+    #[inline]
+    fn cmp(&self, other: &Self) -> Ordering {
+        (&**self).cmp(&**other)
+    }
+}
+
+impl fmt::Debug for DOMString {
+    #[inline]
+    fn fmt(&self, formatter: &mut fmt::Formatter) -> Result<(), fmt::Error> {
+        (&**self).fmt(formatter)
+    }
+}
+
+impl serde::Deserialize for DOMString {
+    #[inline]
+    fn deserialize<D>(deserializer: &mut D) -> Result<Self, D::Error> where D: serde::Deserializer {
+        let string: String = try!(serde::Deserialize::deserialize(deserializer));
+        Ok(DOMString::from(string))
+    }
+}
+
+impl serde::Serialize for DOMString {
+    #[inline]
+    fn serialize<S>(&self, serializer: &mut S) -> Result<(), S::Error> where S: serde::Serializer {
+        (&**self).serialize(serializer)
     }
 }
 
 impl Default for DOMString {
+    #[inline]
     fn default() -> Self {
-        DOMString(String::new())
+        DOMString::new()
     }
 }
 
@@ -52,20 +212,27 @@ impl Deref for DOMString {
 
     #[inline]
     fn deref(&self) -> &str {
-        &self.0
+        match self.unpack_ref() {
+            UnpackedDOMString::Atomic(atom) => atom.deref(),
+            UnpackedDOMString::Stringy(string) => string.deref()
+        }
     }
 }
 
 impl DerefMut for DOMString {
     #[inline]
     fn deref_mut(&mut self) -> &mut str {
-        &mut self.0
-    }
+        match self.unpack_mut() {
+            UnpackedDOMString::Atomic(atom) => panic!("Mutating atoms."),
+            UnpackedDOMString::Stringy(string) => string.deref_mut(),
+        }
+     }
 }
 
 impl AsRef<str> for DOMString {
+    #[inline]
     fn as_ref(&self) -> &str {
-        &self.0
+        self.deref()
     }
 }
 
@@ -77,45 +244,94 @@ impl fmt::Display for DOMString {
 }
 
 impl PartialEq<str> for DOMString {
+    #[inline]
     fn eq(&self, other: &str) -> bool {
         &**self == other
     }
 }
 
 impl<'a> PartialEq<&'a str> for DOMString {
+    #[inline]
     fn eq(&self, other: &&'a str) -> bool {
         &**self == *other
     }
 }
 
 impl From<String> for DOMString {
+    #[inline]
     fn from(contents: String) -> DOMString {
-        DOMString(contents)
+        unsafe { mem::transmute(contents) }
     }
 }
 
 impl<'a> From<&'a str> for DOMString {
+    #[inline]
     fn from(contents: &str) -> DOMString {
         DOMString::from(String::from(contents))
     }
 }
 
+impl From<Atom> for DOMString {
+    #[inline]
+    fn from(atom: Atom) -> DOMString {
+        DOMString::pack(UnpackedDOMString::Atomic(atom))
+    }
+}
+
 impl From<DOMString> for String {
-    fn from(contents: DOMString) -> String {
-        contents.0
+    #[inline]
+    fn from(this: DOMString) -> String {
+        match this.unpack() {
+            UnpackedDOMString::Atomic(atom) => String::from(&*atom),
+            UnpackedDOMString::Stringy(string) => string,
+        }
+    }
+}
+
+impl From<DOMString> for Atom {
+    #[inline]
+    fn from(this: DOMString) -> Atom {
+        match this.unpack() {
+            UnpackedDOMString::Atomic(atom) => atom,
+            UnpackedDOMString::Stringy(string) => Atom::from(&*string),
+        }
+    }
+}
+
+impl<'a> From<&'a DOMString> for Atom {
+    #[inline]
+    fn from(this: &DOMString) -> Atom {
+        // FIXME(ajeffrey): unsafely update the DOMString to be an atom?
+        match this.unpack_ref() {
+            UnpackedDOMString::Atomic(atom) => atom.clone(),
+            UnpackedDOMString::Stringy(string) => Atom::from(&**string),
+        }
     }
 }
 
 impl Into<Vec<u8>> for DOMString {
+    #[inline]
     fn into(self) -> Vec<u8> {
-        self.0.into()
+        String::from(self).into()
+    }
+}
+
+impl Extend<char> for DOMString {
+    #[inline]
+    fn extend<I>(&mut self, iterable: I) where I: IntoIterator<Item=char> {
+        let mut string = match self.unpack_mut() {
+            UnpackedDOMString::Atomic(atom) => String::from(&**atom),
+            UnpackedDOMString::Stringy(string) => { return string.extend(iterable); },
+        };
+        string.extend(iterable);
+        *self = DOMString::from(string);
     }
 }
 
 // https://heycam.github.io/webidl/#es-DOMString
 impl ToJSValConvertible for DOMString {
     unsafe fn to_jsval(&self, cx: *mut JSContext, rval: MutableHandleValue) {
-        (**self).to_jsval(cx, rval);
+        (**self).to_jsval(cx, rval)
     }
 }
 
@@ -131,8 +347,9 @@ pub enum StringificationBehavior {
 /// Convert the given `JSString` to a `DOMString`. Fails if the string does not
 /// contain valid UTF-16.
 pub unsafe fn jsstring_to_str(cx: *mut JSContext, s: *mut JSString) -> DOMString {
+    // FIXME(ajeffrey): convert short jsstrings directly to DOMStrings
     let latin1 = JS_StringHasLatin1Chars(s);
-    DOMString(if latin1 {
+    DOMString::from(if latin1 {
         latin1_to_string(cx, s)
     } else {
         let mut length = 0;
@@ -188,11 +405,11 @@ impl FromJSValConvertible for DOMString {
     }
 }
 
-impl Extend<char> for DOMString {
-    fn extend<I>(&mut self, iterable: I) where I: IntoIterator<Item=char> {
-        self.0.extend(iterable)
-    }
-}
+// impl Extend<char> for DOMString {
+//     fn extend<I>(&mut self, iterable: I) where I: IntoIterator<Item=char> {
+//         self.0.extend(iterable)
+//     }
+// }
 
 pub type StaticCharVec = &'static [char];
 pub type StaticStringVec = &'static [&'static str];

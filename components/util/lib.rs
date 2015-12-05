@@ -16,6 +16,7 @@
 #![feature(reflect_marker)]
 #![feature(step_by)]
 #![feature(step_trait)]
+#![feature(unsafe_no_drop_flag)]
 #![feature(zero_one)]
 
 #![plugin(plugins, serde_macros)]
@@ -46,6 +47,7 @@ extern crate rustc_serialize;
 extern crate selectors;
 extern crate serde;
 extern crate smallvec;
+#[macro_use]
 extern crate string_cache;
 extern crate url;
 extern crate uuid;
