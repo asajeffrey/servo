@@ -65,8 +65,12 @@ impl !Send for DOMString {}
 
 impl DOMString {
     #[inline]
+    fn is_atom(&self) -> bool {
+        self.flag == ATOM
+    }
+    #[inline]
     fn unpack(self) -> UnpackedDOMString<Atom,String> {
-        if self.flag == ATOM {
+        if self.is_atom() {
             // A hack to get round the fact that DOMString implements Drop
             let transmuted: DOMStringData = unsafe { mem::transmute(self) };
             UnpackedDOMString::Atomic(transmuted.atom)
@@ -76,7 +80,7 @@ impl DOMString {
     }
     #[inline]
     fn unpack_ref(&self) -> UnpackedDOMString<&Atom,&String> {
-        if self.flag == ATOM {
+        if self.is_atom() {
             UnpackedDOMString::Atomic(&self.atom)
         } else {
             UnpackedDOMString::Stringy(unsafe { mem::transmute(self) })
@@ -84,7 +88,7 @@ impl DOMString {
     }
     #[inline]
     fn unpack_mut(&mut self) -> UnpackedDOMString<&mut Atom,&mut String> {
-        if self.flag == ATOM {
+        if self.is_atom() {
             UnpackedDOMString::Atomic(&mut self.atom)
         } else {
             UnpackedDOMString::Stringy(unsafe { mem::transmute(self) })
@@ -96,7 +100,7 @@ impl DOMString {
             UnpackedDOMString::Atomic(atom) => DOMString{ flag: ATOM, atom: atom, padding: 0 },
             UnpackedDOMString::Stringy(string) => unsafe {
                 let result: DOMString = mem::transmute(string);
-                assert!(result.flag != ATOM);
+                assert!(!result.is_atom());
                 result
             },
         }
@@ -222,11 +226,14 @@ impl Deref for DOMString {
 impl DerefMut for DOMString {
     #[inline]
     fn deref_mut(&mut self) -> &mut str {
+        if self.is_atom() {
+            *self = DOMString::from(String::from(&**self));
+        }
         match self.unpack_mut() {
             UnpackedDOMString::Atomic(atom) => panic!("Mutating atoms."),
-            UnpackedDOMString::Stringy(string) => string.deref_mut(),
-        }
-     }
+            UnpackedDOMString::Stringy(string) => { return string.deref_mut() },
+        };
+    }
 }
 
 impl AsRef<str> for DOMString {
