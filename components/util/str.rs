@@ -200,7 +200,7 @@ impl Clone for DOMString {
 
 impl Drop for DOMString {
     fn drop(&mut self) {
-        if *self.flag < 1 {
+        if *self.flag != 0 {
             // We need to make sure that the memory for a String or Atom is reclaimed appropriately.
             // We do this by zeroing the contents.
             match self.unpack_mut() {
