@@ -25,7 +25,6 @@ use std::ascii::AsciiExt;
 use std::cell::Cell;
 use string_cache::Atom;
 use util::str::DOMString;
-use string_cache::Atom;
 
 #[derive(JSTraceable, PartialEq, Copy, Clone)]
 #[allow(dead_code)]

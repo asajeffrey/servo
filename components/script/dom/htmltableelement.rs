@@ -94,11 +94,7 @@ impl HTMLTableElementMethods for HTMLTableElement {
 
     // https://html.spec.whatwg.org/multipage/#dom-table-createtbody
     fn CreateTBody(&self) -> Root<HTMLTableSectionElement> {
-<<<<<<< d1aa41a85623733d1d8346a4b7b99d301e001910
         let tbody = HTMLTableSectionElement::new(atom!("tbody"),
-=======
-        let tbody = HTMLTableSectionElement::new(DOMString::from(atom!("tbody")),
->>>>>>> WIP
                                                  None,
                                                  document_from_node(self).r());
         let node = self.upcast::<Node>();

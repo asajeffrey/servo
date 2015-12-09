@@ -1111,7 +1111,7 @@ impl Element {
     }
 
     pub fn set_int_attribute(&self, local_name: &Atom, value: i32) {
-        assert!(&**local_name == local_name.to_ascii_lowercase());
+        assert!(*local_name == local_name.to_ascii_lowercase());
         self.set_attribute(local_name, AttrValue::Int(DOMString::from(value.to_string()), value));
     }
 

@@ -4,18 +4,21 @@
 
 #![feature(alloc)]
 #![feature(box_syntax)]
+#![feature(core)]
 #![feature(core_intrinsics)]
 #![feature(custom_derive)]
 #![feature(decode_utf16)]
 #![feature(fnbox)]
 #![feature(hashmap_hasher)]
 #![feature(heap_api)]
+#![feature(nonzero)]
 #![feature(oom)]
 #![feature(optin_builtin_traits)]
 #![feature(plugin)]
 #![feature(reflect_marker)]
 #![feature(step_by)]
 #![feature(step_trait)]
+#![feature(unsafe_no_drop_flag)]
 #![feature(zero_one)]
 
 #![plugin(plugins, serde_macros)]
@@ -25,6 +28,7 @@ extern crate app_units;
 extern crate azure;
 #[macro_use]
 extern crate bitflags;
+extern crate core;
 #[macro_use]
 extern crate cssparser;
 extern crate euclid;
@@ -46,6 +50,7 @@ extern crate rustc_serialize;
 extern crate selectors;
 extern crate serde;
 extern crate smallvec;
+#[macro_use]
 extern crate string_cache;
 extern crate url;
 extern crate uuid;
