@@ -21,6 +21,9 @@
 #![feature(unsafe_no_drop_flag)]
 #![feature(zero_one)]
 
+#![feature(filling_drop)]
+#![feature(drop_in_place)]
+
 #![plugin(plugins, serde_macros)]
 
 extern crate alloc;

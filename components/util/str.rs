@@ -21,6 +21,7 @@ use std::cmp::Ordering;
 use std::convert::AsRef;
 use std::ffi::CStr;
 use std::fmt;
+use std::intrinsics;
 use std::iter::{Filter, Peekable};
 use std::mem;
 use std::ops::{Deref, DerefMut};
@@ -199,14 +200,19 @@ impl Clone for DOMString {
 }
 
 impl Drop for DOMString {
+    #[inline]
     fn drop(&mut self) {
-        if *self.flag != 0 {
+        if (*self.flag != 0) && (*self.flag != mem::POST_DROP_U64) {
             // We need to make sure that the memory for a String or Atom is reclaimed appropriately.
             // We do this by zeroing the contents.
             match self.unpack_mut() {
-                UnpackedDOMString::Atomic(atom) => { *atom = unsafe { mem::transmute([0;2]) } },
+                UnpackedDOMString::Atomic(atom) => {
+                    unsafe { *atom = mem::zeroed() }
+                },
                 UnpackedDOMString::Inlined(string) => {},
-                UnpackedDOMString::Stringy(string) => { *string = unsafe { mem::transmute([0;6]) } },
+                UnpackedDOMString::Stringy(string) => {
+                    unsafe { *string = mem::zeroed() }
+                }
             }
         }
     }
@@ -267,7 +273,7 @@ impl serde::Serialize for DOMString {
 impl Default for DOMString {
     #[inline]
     fn default() -> Self {
-        DOMString::new()
+       DOMString::new()
     }
 }
 
