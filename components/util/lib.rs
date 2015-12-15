@@ -18,6 +18,7 @@
 #![feature(reflect_marker)]
 #![feature(step_by)]
 #![feature(step_trait)]
+#![feature(unicode)]
 #![feature(unsafe_no_drop_flag)]
 #![feature(zero_one)]
 

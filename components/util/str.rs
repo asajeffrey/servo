@@ -5,9 +5,9 @@
 use app_units::Au;
 use core::nonzero::NonZero;
 use cssparser::{self, Color, RGBA};
-use js::conversions::{FromJSValConvertible, ToJSValConvertible, latin1_to_string};
+use js::conversions::{FromJSValConvertible, ToJSValConvertible};
 use js::jsapi::{JSContext, JSString, HandleValue, MutableHandleValue};
-use js::jsapi::{JS_GetTwoByteStringCharsAndLength, JS_StringHasLatin1Chars};
+use js::jsapi::{JS_GetTwoByteStringCharsAndLength, JS_GetLatin1StringCharsAndLength, JS_StringHasLatin1Chars};
 use js::jsval::StringValue;
 use js::rust::ToString;
 use libc::c_char;
@@ -445,22 +445,41 @@ pub enum StringificationBehavior {
     Empty,
 }
 
+/// Given an iterator and an bounds on the length in utf8 bytes, convert it to a DOMString.
+/// Can panic if the bounds are incorrect.
+pub unsafe fn iter_to_str<I>(char_iterator: I, length_lower_bound: usize, length_upper_bound: usize) -> DOMString
+    where I : Iterator<Item=char>
+{
+    if length_upper_bound <= 32 {
+        let mut index = 0;
+        let mut buffer = [0;32];
+        for ch in char_iterator { index += ch.encode_utf8(&mut buffer[index..]).unwrap() }
+        DOMString::from(from_utf8_unchecked(&buffer[0..index]))
+    } else {
+        let mut string = String::with_capacity(length_lower_bound);
+        string.extend(char_iterator);
+        DOMString::from(string)
+    }
+}
+
 /// Convert the given `JSString` to a `DOMString`. Fails if the string does not
 /// contain valid UTF-16.
 pub unsafe fn jsstring_to_str(cx: *mut JSContext, s: *mut JSString) -> DOMString {
-    // FIXME(ajeffrey): convert short jsstrings directly to DOMStrings
-    let latin1 = JS_StringHasLatin1Chars(s);
-    DOMString::from(if latin1 {
-        latin1_to_string(cx, s)
+    if JS_StringHasLatin1Chars(s) {
+        let mut latin1_length = 0;
+        let latin1_chars = JS_GetLatin1StringCharsAndLength(cx, ptr::null(), s, &mut latin1_length);
+        assert!(!latin1_chars.is_null());
+        let latin1_slice = slice::from_raw_parts(latin1_chars, latin1_length);
+        let char_iterator = latin1_slice.iter().map(|&c| c as char);
+        iter_to_str(char_iterator, latin1_length, latin1_length * 2)
     } else {
-        let mut length = 0;
-        let chars = JS_GetTwoByteStringCharsAndLength(cx, ptr::null(), s, &mut length);
-        assert!(!chars.is_null());
-        let potentially_ill_formed_utf16 = slice::from_raw_parts(chars, length as usize);
-        let mut s = String::with_capacity(length as usize);
-        for item in char::decode_utf16(potentially_ill_formed_utf16.iter().cloned()) {
+        let mut two_byte_length = 0;
+        let two_byte_chars = JS_GetTwoByteStringCharsAndLength(cx, ptr::null(), s, &mut two_byte_length);
+        assert!(!two_byte_chars.is_null());
+        let two_byte_slice = slice::from_raw_parts(two_byte_chars, two_byte_length);
+        let char_iterator = char::decode_utf16(two_byte_slice.iter().cloned()).map(|item| {
             match item {
-                Ok(c) => s.push(c),
+                Ok(c) => c,
                 Err(_) => {
                     // FIXME: Add more info like document URL in the message?
                     macro_rules! message {
@@ -472,16 +491,16 @@ pub unsafe fn jsstring_to_str(cx: *mut JSContext, s: *mut JSString) -> DOMString
                     }
                     if opts::get().replace_surrogates {
                         error!(message!());
-                        s.push('\u{FFFD}');
+                        '\u{FFFD}'
                     } else {
                         panic!(concat!(message!(), " Use `-Z replace-surrogates` \
                             on the command line to make this non-fatal."));
                     }
                 }
             }
-        }
-        s
-    })
+        });
+        iter_to_str(char_iterator, two_byte_length, two_byte_length + (two_byte_length >> 1))
+    }
 }
 
 // https://heycam.github.io/webidl/#es-DOMString
