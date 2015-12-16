@@ -456,10 +456,10 @@ const STACK_ALLOCATED_STRING_SIZE: usize = 2*INLINED_STRING_SIZE;
 pub unsafe fn iter_to_str<I>(char_iterator: I, length_lower_bound: usize, length_upper_bound: usize) -> DOMString
     where I : Iterator<Item=char>
 {
-    if length_upper_bound <= STACK_ALLOCATED_STRING_SIZE {
+    if length_upper_bound < STACK_ALLOCATED_STRING_SIZE {
         let mut index = 0;
-        let mut buffer = [0;STACK_ALLOCATED_STRING_SIZE];
-        for ch in char_iterator { index += ch.encode_utf8(&mut buffer[index..]).unwrap() }
+        let mut buffer: [u8;STACK_ALLOCATED_STRING_SIZE] = mem::zeroed();
+        for ch in char_iterator { index += ch.encode_utf8(&mut buffer[index..]).unwrap(); }
         DOMString::from(from_utf8_unchecked(&buffer[0..index]))
     } else {
         let mut string = String::with_capacity(length_lower_bound);
@@ -505,7 +505,7 @@ pub unsafe fn jsstring_to_str(cx: *mut JSContext, s: *mut JSString) -> DOMString
                 }
             }
         });
-        iter_to_str(char_iterator, two_byte_length, two_byte_length + (two_byte_length >> 1))
+        iter_to_str(char_iterator, two_byte_length, two_byte_length * 3)
     }
 }
 
