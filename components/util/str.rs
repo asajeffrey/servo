@@ -3,47 +3,281 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 use app_units::Au;
+use core::nonzero::NonZero;
 use cssparser::{self, Color, RGBA};
-use js::conversions::{FromJSValConvertible, ToJSValConvertible, latin1_to_string};
+use js::conversions::{FromJSValConvertible, ToJSValConvertible};
 use js::jsapi::{JSContext, JSString, HandleValue, MutableHandleValue};
-use js::jsapi::{JS_GetTwoByteStringCharsAndLength, JS_StringHasLatin1Chars};
+use js::jsapi::{JS_GetTwoByteStringCharsAndLength, JS_GetLatin1StringCharsAndLength, JS_StringHasLatin1Chars};
 use js::rust::ToString;
 use libc::c_char;
 use num_lib::ToPrimitive;
 use opts;
+use serde;
 use std::ascii::AsciiExt;
 use std::borrow::ToOwned;
 use std::char;
+use std::cmp::Ordering;
 use std::convert::AsRef;
 use std::ffi::CStr;
 use std::fmt;
+use std::hash::{Hash, Hasher};
 use std::iter::{Filter, Peekable};
+use std::mem;
 use std::ops::{Deref, DerefMut};
 use std::ptr;
 use std::slice;
-use std::str::{CharIndices, FromStr, Split, from_utf8};
+use std::str::{CharIndices, FromStr, Split, from_utf8, from_utf8_unchecked};
+use std::usize;
+use string_cache::Atom;
 
-#[derive(Clone, PartialOrd, Ord, PartialEq, Eq, Deserialize, Serialize, Hash, Debug)]
-pub struct DOMString(String);
+// An unpacked DOM String is either a String on the heap,
+// or an atom or an array of bytes. Logically, this is the representation
+// of strings, but the unpacked version is 4 words, compared to 3 for a String,
+
+enum UnpackedDOMString<A,B,C> {
+    Atomic(A),
+    Inlined(B),
+    Stringy(C),
+}
+
+// A packed DOMString that is 3 words long. This relies on the fact that the first
+// word in a String is a word-aligned pointer, so cannot be 3 or 5 (it can be 1 since that is used as heap::EMPTY).
+// We can use the first word as a flag saying whether the DOMString is a String or an Atom or an inlined string.
+
+// The magic values used for tagging Atom and InlinedString
+const ATOM: usize = 3;
+const INLINED: usize = 5;
+
+// Sizes of types. These are mentioned in unit tests, so must be public.
+pub const WORD_SIZE: usize = usize::BYTES;
+pub const STRING_SIZE: usize = 3*WORD_SIZE;
+pub const ATOM_SIZE: usize = 8;
+pub const DOMSTRING_SIZE: usize = STRING_SIZE;
+pub const INLINED_STRING_SIZE: usize = DOMSTRING_SIZE - WORD_SIZE;
+
+#[unsafe_no_drop_flag]
+#[allow(dead_code)]
+pub struct DOMString {
+    flag: NonZero<usize>,
+    data: [u8;(DOMSTRING_SIZE - WORD_SIZE)],
+}
+
+#[allow(dead_code)]
+struct DOMStringAtom {
+    flag: NonZero<usize>,
+    atom: Atom,
+    padding: [u8;(DOMSTRING_SIZE - (WORD_SIZE + ATOM_SIZE))],
+}
+
+struct DOMStringInlined {
+    flag: NonZero<usize>,
+    string: InlinedString,
+}
+
+#[derive(Clone,Copy)]
+pub struct InlinedString{
+    bytes: [u8;INLINED_STRING_SIZE-1],
+    length: u8,
+}
 
 impl !Send for DOMString {}
 
+#[inline]
+#[allow(mutable_transmutes)]
+unsafe fn from_utf8_unchecked_mut(bytes: &mut [u8]) -> &mut str {
+    mem::transmute(from_utf8_unchecked(bytes))
+}
+
+#[inline]
+unsafe fn as_inlined_string(string: &str) -> InlinedString {
+    if string.len() == 0 {
+        mem::zeroed()
+    } else {
+        // FIXME(ajeffrey): this can fail if the string length < 9,
+        // and the string is stored as the last word on a page of memory,
+        // and the next page is unreadable.
+        assert!(string.len() < INLINED_STRING_SIZE);
+        let transmuted: &InlinedString = mem::transmute(string.as_ptr());
+        let mut result = *transmuted;
+        result.length = string.len() as u8;
+        result
+    }
+}
+
+impl Deref for InlinedString {
+    type Target = str;
+
+    #[inline]
+    fn deref(&self) -> &str {
+        unsafe { from_utf8_unchecked(&self.bytes[0..(self.length as usize)]) }
+    }
+}
+
+impl DerefMut for InlinedString {
+    #[inline]
+    fn deref_mut(&mut self) -> &mut str {
+        unsafe { from_utf8_unchecked_mut(&mut self.bytes[0..(self.length as usize)]) }
+    }
+}
+
 impl DOMString {
+    #[inline]
+    fn unpack(self) -> UnpackedDOMString<Atom, InlinedString, String> {
+        match *self.flag {
+            ATOM => {
+                let transmuted: DOMStringAtom = unsafe { mem::transmute(self) };
+                UnpackedDOMString::Atomic(transmuted.atom)
+            },
+            INLINED => {
+                let transmuted: DOMStringInlined = unsafe { mem::transmute(self) };
+                UnpackedDOMString::Inlined(transmuted.string)
+            },
+            _ => {
+                let transmuted: String = unsafe { mem::transmute(self) };
+                UnpackedDOMString::Stringy(transmuted)
+            }
+        }
+    }
+    #[inline]
+    fn unpack_ref(&self) -> UnpackedDOMString<&Atom, &InlinedString, &String> {
+        match *self.flag {
+            ATOM => {
+                let transmuted: &DOMStringAtom = unsafe { mem::transmute(self) };
+                UnpackedDOMString::Atomic(&transmuted.atom)
+            },
+            INLINED => {
+                let transmuted: &DOMStringInlined = unsafe { mem::transmute(self) };
+                UnpackedDOMString::Inlined(&transmuted.string)
+            },
+            _ => {
+                let transmuted: &String = unsafe { mem::transmute(self) };
+                UnpackedDOMString::Stringy(transmuted)
+            }
+        }
+    }
+    #[inline]
+    fn unpack_mut(&mut self) -> UnpackedDOMString<&mut Atom, &mut InlinedString, &mut String> {
+        match *self.flag {
+            ATOM => {
+                let transmuted: &mut DOMStringAtom = unsafe { mem::transmute(self) };
+                UnpackedDOMString::Atomic(&mut transmuted.atom)
+            },
+            INLINED => {
+                let transmuted: &mut DOMStringInlined = unsafe { mem::transmute(self) };
+                UnpackedDOMString::Inlined(&mut transmuted.string)
+            },
+            _ => {
+                let transmuted: &mut String = unsafe { mem::transmute(self) };
+                UnpackedDOMString::Stringy(transmuted)
+            }
+        }
+    }
+    #[inline]
     pub fn new() -> DOMString {
-        DOMString(String::new())
+        DOMString::from(atom!(""))
     }
-    // FIXME(ajeffrey): implement more of the String methods on DOMString?
-    pub fn push_str(&mut self, string: &str) {
-        self.0.push_str(string)
-    }
+    #[inline]
     pub fn clear(&mut self) {
-        self.0.clear()
+        match self.unpack_mut() {
+            UnpackedDOMString::Atomic(_) => {},
+            UnpackedDOMString::Inlined(_) => {},
+            UnpackedDOMString::Stringy(string) => { return string.clear(); },
+        }
+        *self = DOMString::new();
+    }
+    #[inline]
+    pub fn push_str(&mut self, contents: &str) {
+        let mut string = match self.unpack_mut() {
+            UnpackedDOMString::Atomic(atom) => String::from(&**atom),
+            UnpackedDOMString::Inlined(string) => String::from(&**string),
+            UnpackedDOMString::Stringy(string) => { return string.push_str(contents); },
+        };
+        string.push_str(contents);
+        *self = DOMString::from(string);
+    }
+}
+
+impl Clone for DOMString {
+    fn clone(&self) -> DOMString {
+        match self.unpack_ref() {
+            UnpackedDOMString::Atomic(atom) => DOMString::from(atom.clone()),
+            UnpackedDOMString::Inlined(string) => DOMString::from(string.clone()),
+            UnpackedDOMString::Stringy(string) => DOMString::from(string.clone()),
+        }
+    }
+}
+
+impl Drop for DOMString {
+    #[inline]
+    fn drop(&mut self) {
+        if (*self.flag != 0) && (*self.flag != mem::POST_DROP_USIZE) {
+            // We need to make sure that the memory for a String or Atom is reclaimed appropriately.
+            // We do this by zeroing the contents.
+            match self.unpack_mut() {
+                UnpackedDOMString::Atomic(atom) => unsafe { *atom = mem::zeroed() },
+                UnpackedDOMString::Inlined(_) => {},
+                UnpackedDOMString::Stringy(string) => unsafe { *string = mem::zeroed() },
+            }
+        }
+    }
+}
+
+impl PartialEq for DOMString {
+    #[inline]
+    fn eq(&self, other: &DOMString) -> bool {
+        (&**self).eq(&**other)
+    }
+}
+
+impl Eq for DOMString {}
+
+impl Hash for DOMString {
+    #[inline]
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        (&**self).hash(state)
+    }
+}
+
+impl PartialOrd for DOMString {
+    #[inline]
+    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+        (&**self).partial_cmp(&**other)
+    }
+}
+
+impl Ord for DOMString {
+    #[inline]
+    fn cmp(&self, other: &Self) -> Ordering {
+        (&**self).cmp(&**other)
+    }
+}
+
+impl fmt::Debug for DOMString {
+    #[inline]
+    fn fmt(&self, formatter: &mut fmt::Formatter) -> Result<(), fmt::Error> {
+        (&**self).fmt(formatter)
+    }
+}
+
+impl serde::Deserialize for DOMString {
+    #[inline]
+    fn deserialize<D>(deserializer: &mut D) -> Result<Self, D::Error> where D: serde::Deserializer {
+        let string: String = try!(serde::Deserialize::deserialize(deserializer));
+        Ok(DOMString::from(string))
+    }
+}
+
+impl serde::Serialize for DOMString {
+    #[inline]
+    fn serialize<S>(&self, serializer: &mut S) -> Result<(), S::Error> where S: serde::Serializer {
+        (&**self).serialize(serializer)
     }
 }
 
 impl Default for DOMString {
+    #[inline]
     fn default() -> Self {
-        DOMString(String::new())
+       DOMString::new()
     }
 }
 
@@ -52,20 +286,32 @@ impl Deref for DOMString {
 
     #[inline]
     fn deref(&self) -> &str {
-        &self.0
+        match self.unpack_ref() {
+            UnpackedDOMString::Atomic(atom) => atom.deref(),
+            UnpackedDOMString::Inlined(string) => string.deref(),
+            UnpackedDOMString::Stringy(string) => string.deref()
+        }
     }
 }
 
 impl DerefMut for DOMString {
     #[inline]
     fn deref_mut(&mut self) -> &mut str {
-        &mut self.0
+        if *self.flag == ATOM {
+            *self = DOMString::from(String::from(&**self));
+        }
+        match self.unpack_mut() {
+            UnpackedDOMString::Atomic(_) => panic!("Mutating atoms."),
+            UnpackedDOMString::Inlined(string) => string.deref_mut(),
+            UnpackedDOMString::Stringy(string) => string.deref_mut(),
+        }
     }
 }
 
 impl AsRef<str> for DOMString {
+    #[inline]
     fn as_ref(&self) -> &str {
-        &self.0
+        self.deref()
     }
 }
 
@@ -77,38 +323,113 @@ impl fmt::Display for DOMString {
 }
 
 impl PartialEq<str> for DOMString {
+    #[inline]
     fn eq(&self, other: &str) -> bool {
         &**self == other
     }
 }
 
 impl<'a> PartialEq<&'a str> for DOMString {
+    #[inline]
     fn eq(&self, other: &&'a str) -> bool {
         &**self == *other
     }
 }
 
 impl From<String> for DOMString {
+    #[inline]
     fn from(contents: String) -> DOMString {
-        DOMString(contents)
+        unsafe { mem::transmute(contents) }
+    }
+}
+
+impl From<Atom> for DOMString {
+    #[inline]
+    fn from(atom: Atom) -> DOMString {
+        unsafe {
+            mem::transmute(DOMStringAtom{
+                flag: NonZero::new(ATOM),
+                atom: atom,
+                padding: mem::zeroed(),
+            })
+        }
+    }
+}
+
+impl From<InlinedString> for DOMString {
+    #[inline]
+    fn from(string: InlinedString) -> DOMString {
+        unsafe {
+            mem::transmute(DOMStringInlined{
+                flag: NonZero::new(INLINED),
+                string: string,
+            })
+        }
     }
 }
 
 impl<'a> From<&'a str> for DOMString {
-    fn from(contents: &str) -> DOMString {
-        DOMString::from(String::from(contents))
+    #[inline]
+    fn from(string: &str) -> DOMString {
+        if string.len() < INLINED_STRING_SIZE {
+            DOMString::from(unsafe { as_inlined_string(string) })
+        } else {
+            DOMString::from(String::from(string))
+        }
     }
 }
 
 impl From<DOMString> for String {
-    fn from(contents: DOMString) -> String {
-        contents.0
+    #[inline]
+    fn from(this: DOMString) -> String {
+        match this.unpack() {
+            UnpackedDOMString::Atomic(atom) => String::from(&*atom),
+            UnpackedDOMString::Inlined(string) => String::from(&*string),
+            UnpackedDOMString::Stringy(string) => string,
+        }
+    }
+}
+
+impl From<DOMString> for Atom {
+    #[inline]
+    fn from(this: DOMString) -> Atom {
+        match this.unpack() {
+            UnpackedDOMString::Atomic(atom) => atom,
+            UnpackedDOMString::Inlined(string) => Atom::from(&*string),
+            UnpackedDOMString::Stringy(string) => Atom::from(&*string),
+        }
+    }
+}
+
+impl<'a> From<&'a DOMString> for Atom {
+    #[inline]
+    fn from(this: &DOMString) -> Atom {
+        // FIXME(ajeffrey): unsafely update the DOMString to be an atom?
+        match this.unpack_ref() {
+            UnpackedDOMString::Atomic(atom) => atom.clone(),
+            UnpackedDOMString::Inlined(string) => Atom::from(&**string),
+            UnpackedDOMString::Stringy(string) => Atom::from(&**string),
+        }
     }
 }
 
 impl Into<Vec<u8>> for DOMString {
+    #[inline]
     fn into(self) -> Vec<u8> {
-        self.0.into()
+        String::from(self).into()
+    }
+}
+
+impl Extend<char> for DOMString {
+    #[inline]
+    fn extend<I>(&mut self, iterable: I) where I: IntoIterator<Item=char> {
+        let mut string = match self.unpack_mut() {
+            UnpackedDOMString::Atomic(atom) => String::from(&**atom),
+            UnpackedDOMString::Inlined(string) => String::from(&**string),
+            UnpackedDOMString::Stringy(string) => { return string.extend(iterable); },
+        };
+        string.extend(iterable);
+        *self = DOMString::from(string);
     }
 }
 
@@ -128,21 +449,43 @@ pub enum StringificationBehavior {
     Empty,
 }
 
+const STACK_ALLOCATED_STRING_SIZE: usize = 2*INLINED_STRING_SIZE;
+
+/// Given an iterator and an bounds on the length in utf8 bytes, convert it to a DOMString.
+/// Can panic if the bounds are incorrect.
+pub unsafe fn iter_to_str<I>(char_iterator: I, length_lower_bound: usize, length_upper_bound: usize) -> DOMString
+    where I : Iterator<Item=char>
+{
+    if length_upper_bound <= STACK_ALLOCATED_STRING_SIZE {
+        let mut index = 0;
+        let mut buffer = [0;STACK_ALLOCATED_STRING_SIZE];
+        for ch in char_iterator { index += ch.encode_utf8(&mut buffer[index..]).unwrap() }
+        DOMString::from(from_utf8_unchecked(&buffer[0..index]))
+    } else {
+        let mut string = String::with_capacity(length_lower_bound);
+        string.extend(char_iterator);
+        DOMString::from(string)
+    }
+}
+
 /// Convert the given `JSString` to a `DOMString`. Fails if the string does not
 /// contain valid UTF-16.
 pub unsafe fn jsstring_to_str(cx: *mut JSContext, s: *mut JSString) -> DOMString {
-    let latin1 = JS_StringHasLatin1Chars(s);
-    DOMString(if latin1 {
-        latin1_to_string(cx, s)
+    if JS_StringHasLatin1Chars(s) {
+        let mut latin1_length = 0;
+        let latin1_chars = JS_GetLatin1StringCharsAndLength(cx, ptr::null(), s, &mut latin1_length);
+        assert!(!latin1_chars.is_null());
+        let latin1_slice = slice::from_raw_parts(latin1_chars, latin1_length);
+        let char_iterator = latin1_slice.iter().map(|&c| c as char);
+        iter_to_str(char_iterator, latin1_length, latin1_length * 2)
     } else {
-        let mut length = 0;
-        let chars = JS_GetTwoByteStringCharsAndLength(cx, ptr::null(), s, &mut length);
-        assert!(!chars.is_null());
-        let potentially_ill_formed_utf16 = slice::from_raw_parts(chars, length as usize);
-        let mut s = String::with_capacity(length as usize);
-        for item in char::decode_utf16(potentially_ill_formed_utf16.iter().cloned()) {
+        let mut two_byte_length = 0;
+        let two_byte_chars = JS_GetTwoByteStringCharsAndLength(cx, ptr::null(), s, &mut two_byte_length);
+        assert!(!two_byte_chars.is_null());
+        let two_byte_slice = slice::from_raw_parts(two_byte_chars, two_byte_length);
+        let char_iterator = char::decode_utf16(two_byte_slice.iter().cloned()).map(|item| {
             match item {
-                Ok(c) => s.push(c),
+                Ok(c) => c,
                 Err(_) => {
                     // FIXME: Add more info like document URL in the message?
                     macro_rules! message {
@@ -154,16 +497,16 @@ pub unsafe fn jsstring_to_str(cx: *mut JSContext, s: *mut JSString) -> DOMString
                     }
                     if opts::get().replace_surrogates {
                         error!(message!());
-                        s.push('\u{FFFD}');
+                        '\u{FFFD}'
                     } else {
                         panic!(concat!(message!(), " Use `-Z replace-surrogates` \
                             on the command line to make this non-fatal."));
                     }
                 }
             }
-        }
-        s
-    })
+        });
+        iter_to_str(char_iterator, two_byte_length, two_byte_length + (two_byte_length >> 1))
+    }
 }
 
 // https://heycam.github.io/webidl/#es-DOMString
@@ -188,11 +531,11 @@ impl FromJSValConvertible for DOMString {
     }
 }
 
-impl Extend<char> for DOMString {
-    fn extend<I>(&mut self, iterable: I) where I: IntoIterator<Item=char> {
-        self.0.extend(iterable)
-    }
-}
+// impl Extend<char> for DOMString {
+//     fn extend<I>(&mut self, iterable: I) where I: IntoIterator<Item=char> {
+//         self.0.extend(iterable)
+//     }
+// }
 
 pub type StaticCharVec = &'static [char];
 pub type StaticStringVec = &'static [&'static str];

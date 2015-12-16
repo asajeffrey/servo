@@ -10,6 +10,7 @@ extern crate alloc;
 extern crate app_units;
 extern crate euclid;
 extern crate libc;
+extern crate string_cache;
 extern crate util;
 
 #[cfg(test)] mod cache;

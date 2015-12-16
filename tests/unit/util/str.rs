@@ -3,9 +3,21 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 use app_units::Au;
+use string_cache::Atom;
+use std::mem;
+use util::str;
 use util::str::LengthOrPercentageOrAuto;
 use util::str::{parse_length, search_index, split_html_space_chars, str_join};
 
+
+// Make sure we got those right.
+#[test] fn test_type_sizes() {
+    assert_eq!(str::WORD_SIZE, mem::size_of::<usize>());
+    assert_eq!(str::STRING_SIZE, mem::size_of::<String>());
+    assert_eq!(str::ATOM_SIZE, mem::size_of::<Atom>());
+    assert_eq!(str::DOMSTRING_SIZE, mem::size_of::<str::DOMString>());
+    assert_eq!(str::INLINED_STRING_SIZE, mem::size_of::<str::InlinedString>());
+}
 
 #[test]
 pub fn test_parse_length() {
