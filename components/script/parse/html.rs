@@ -46,9 +46,7 @@ fn insert(parent: &Node, reference_child: Option<&Node>, child: NodeOrText<JS<No
             assert!(parent.InsertBefore(&n, reference_child).is_ok());
         },
         NodeOrText::AppendText(t) => {
-            // FIXME(ajeffrey): convert directly from tendrils to DOMStrings
-            let s: String = t.into();
-            let text = Text::new(DOMString::from(s), &parent.owner_doc());
+            let text = Text::new(DOMString::from(t), &parent.owner_doc());
             assert!(parent.InsertBefore(text.upcast(), reference_child).is_ok());
         }
     }
@@ -86,14 +84,14 @@ impl<'a> TreeSink for servohtmlparser::Sink {
                                    ElementCreator::ParserCreated);
 
         for attr in attrs {
-            elem.set_attribute_from_parser(attr.name, DOMString::from(String::from(attr.value)), None);
+            elem.set_attribute_from_parser(attr.name, DOMString::from(attr.value), None);
         }
 
         JS::from_ref(elem.upcast())
     }
 
     fn create_comment(&mut self, text: StrTendril) -> JS<Node> {
-        let comment = Comment::new(DOMString::from(String::from(text)), &*self.document);
+        let comment = Comment::new(DOMString::from(text), &*self.document);
         JS::from_ref(comment.upcast())
     }
 
@@ -127,8 +125,8 @@ impl<'a> TreeSink for servohtmlparser::Sink {
                                   system_id: StrTendril) {
         let doc = &*self.document;
         let doctype = DocumentType::new(
-            DOMString::from(String::from(name)), Some(DOMString::from(String::from(public_id))),
-            Some(DOMString::from(String::from(system_id))), doc);
+            DOMString::from(name), Some(DOMString::from(public_id)),
+            Some(DOMString::from(system_id)), doc);
         doc.upcast::<Node>().AppendChild(doctype.upcast()).expect("Appending failed");
     }
 
@@ -136,7 +134,7 @@ impl<'a> TreeSink for servohtmlparser::Sink {
         let elem = target.downcast::<Element>()
             .expect("tried to set attrs on non-Element in HTML parsing");
         for attr in attrs {
-            elem.set_attribute_from_parser(attr.name, DOMString::from(String::from(attr.value)), None);
+            elem.set_attribute_from_parser(attr.name, DOMString::from(attr.value), None);
         }
     }
 

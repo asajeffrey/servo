@@ -22,6 +22,7 @@ use std::ffi::CStr;
 use std::fmt;
 use std::hash::{Hash, Hasher};
 use std::iter::{Filter, Peekable};
+use std::io::Write;
 use std::mem;
 use std::ops::{Deref, DerefMut};
 use std::ptr;
@@ -29,6 +30,7 @@ use std::slice;
 use std::str::{CharIndices, FromStr, Split, from_utf8, from_utf8_unchecked};
 use std::usize;
 use string_cache::Atom;
+use tendril::StrTendril;
 
 // An unpacked DOM String is either a String on the heap,
 // or an atom or an array of bytes. Logically, this is the representation
@@ -187,13 +189,21 @@ impl DOMString {
     }
     #[inline]
     pub fn push_str(&mut self, contents: &str) {
-        let mut string = match self.unpack_mut() {
-            UnpackedDOMString::Atomic(atom) => String::from(&**atom),
-            UnpackedDOMString::Inlined(string) => String::from(&**string),
+        match self.unpack_mut() {
+            UnpackedDOMString::Atomic(_) => {}
+            UnpackedDOMString::Inlined(_) => {}
             UnpackedDOMString::Stringy(string) => { return string.push_str(contents); },
         };
-        string.push_str(contents);
-        *self = DOMString::from(string);
+        if (self.len() + contents.len()) < INLINED_STRING_SIZE {
+            let mut buffer:[u8;INLINED_STRING_SIZE] = unsafe { mem::zeroed() };
+            (&mut buffer[..self.len()]).write(self.as_bytes()).unwrap();
+            (&mut buffer[self.len()..]).write(contents.as_bytes()).unwrap();
+            *self = DOMString::from(unsafe { from_utf8_unchecked(&buffer[0..(self.len() + contents.len())]) })
+        } else {
+            let mut string = String::from(&**self);
+            string.push_str(contents);
+            *self = DOMString::from(string);
+         }
     }
 }
 
@@ -202,7 +212,7 @@ impl Clone for DOMString {
         match self.unpack_ref() {
             UnpackedDOMString::Atomic(atom) => DOMString::from(atom.clone()),
             UnpackedDOMString::Inlined(string) => DOMString::from(string.clone()),
-            UnpackedDOMString::Stringy(string) => DOMString::from(string.clone()),
+            UnpackedDOMString::Stringy(string) => DOMString::from(&**string),
         }
     }
 }
@@ -338,8 +348,9 @@ impl<'a> PartialEq<&'a str> for DOMString {
 
 impl From<String> for DOMString {
     #[inline]
-    fn from(contents: String) -> DOMString {
-        unsafe { mem::transmute(contents) }
+    fn from(string: String) -> DOMString {
+        if (string.len() < INLINED_STRING_SIZE) { println!("STRING {}", &*string); }
+        unsafe { mem::transmute(string) }
     }
 }
 
@@ -373,6 +384,17 @@ impl<'a> From<&'a str> for DOMString {
     fn from(string: &str) -> DOMString {
         if string.len() < INLINED_STRING_SIZE {
             DOMString::from(unsafe { as_inlined_string(string) })
+        } else {
+            DOMString::from(String::from(string))
+        }
+    }
+}
+
+impl From<StrTendril> for DOMString {
+    #[inline]
+    fn from(string: StrTendril) -> DOMString {
+        if string.len() < INLINED_STRING_SIZE {
+            DOMString::from(unsafe { as_inlined_string(&*string) })
         } else {
             DOMString::from(String::from(string))
         }

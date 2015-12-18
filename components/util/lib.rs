@@ -54,6 +54,7 @@ extern crate serde;
 extern crate smallvec;
 #[macro_use]
 extern crate string_cache;
+extern crate tendril;
 extern crate url;
 extern crate uuid;
 

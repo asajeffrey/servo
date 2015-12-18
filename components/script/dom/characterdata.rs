@@ -150,7 +150,6 @@ impl CharacterData {
     }
     #[inline]
     pub fn append_data(&self, data: &str) {
-        // FIXME(ajeffrey): Efficient append on DOMStrings?
         self.data.borrow_mut().push_str(data);
         self.content_changed();
     }

@@ -6,7 +6,7 @@ use cssparser::RGBA;
 use std::ops::Deref;
 use string_cache::{Atom, Namespace};
 use util::str::{DOMString, LengthOrPercentageOrAuto, parse_unsigned_integer, parse_legacy_color, parse_length};
-use util::str::{split_html_space_chars, str_join, parse_integer};
+use util::str::{split_html_space_chars, parse_integer};
 use values::specified::{Length};
 
 // Duplicated from script::dom::values.
@@ -37,8 +37,17 @@ impl AttrValue {
     }
 
     pub fn from_atomic_tokens(atoms: Vec<Atom>) -> AttrValue {
-        // TODO(ajeffrey): effecient conversion of Vec<Atom> to DOMString
-        let tokens = DOMString::from(str_join(&atoms, "\x20"));
+        let tokens = match atoms.first() {
+            None => DOMString::new(),
+            Some(atom) => {
+                let mut tokens = DOMString::from(atom.clone());
+                for atom in &atoms[1..] {
+                    tokens.push_str("\x20");
+                    tokens.push_str(&*atom);
+                }
+                tokens
+            }
+        };
         AttrValue::TokenList(tokens, atoms)
     }
 

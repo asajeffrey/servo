@@ -2025,6 +2025,7 @@ impl DocumentMethods for Document {
             None => DOMString::new(),
             Some(ref title) => {
                 // Steps 3-4.
+                // FIXME(ajeffrey): optimize the common case that all html space is already " "
                 let value = Node::collect_text_contents(title.children());
                 DOMString::from(str_join(split_html_space_chars(&value), " "))
             },

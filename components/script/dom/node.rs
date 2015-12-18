@@ -1700,21 +1700,23 @@ impl Node {
     }
 
     pub fn collect_text_contents<T: Iterator<Item=Root<Node>>>(iterator: T) -> DOMString {
-        let mut content = String::new();
+        let mut result = DOMString::new();
         for node in iterator {
-            match node.downcast::<Text>() {
-                Some(text) => content.push_str(&text.upcast::<CharacterData>().Data()),
-                None => (),
+            if let Some(text) = node.downcast::<Text>() {
+                if result.is_empty() {
+                    result = text.upcast::<CharacterData>().Data();
+                } else {
+                    result.push_str(&text.upcast::<CharacterData>().data());
+                }
             }
         }
-        DOMString::from(content)
+        result
     }
 
     pub fn namespace_to_string(namespace: Namespace) -> Option<DOMString> {
         match namespace {
             ns!() => None,
-            // FIXME(ajeffrey): convert directly from &Atom to DOMString
-            Namespace(ref ns) => Some(DOMString::from(&**ns))
+            Namespace(ns) => Some(DOMString::from(ns))
         }
     }
 
