@@ -41,7 +41,7 @@ use gfx_traits::Epoch;
 use gfx_traits::LayerId;
 use ipc_channel::ipc::{IpcReceiver, IpcSender};
 use libc::c_void;
-use msg::constellation_msg::{ConstellationChan, Failure, PipelineId, WindowSizeData};
+use msg::constellation_msg::{PipelineId, WindowSizeData};
 use msg::constellation_msg::{Key, KeyModifiers, KeyState, LoadData};
 use msg::constellation_msg::{PipelineNamespaceId, SubpageId};
 use msg::webdriver_msg::WebDriverScriptCommand;
@@ -93,8 +93,6 @@ pub struct NewLayoutInfo {
     /// The paint channel, cast to `OptionalOpaqueIpcSender`. This is really an
     /// `Sender<LayoutToPaintMsg>`.
     pub paint_chan: OptionalOpaqueIpcSender,
-    /// Information on what to do on thread failure.
-    pub failure: Failure,
     /// A port on which layout can receive messages from the pipeline.
     pub pipeline_port: IpcReceiver<LayoutControlMsg>,
     /// A shutdown channel so that layout can notify others when it's done.
@@ -312,13 +310,11 @@ pub struct InitialScriptState {
     /// A port on which messages sent by the constellation to script can be received.
     pub control_port: IpcReceiver<ConstellationControlMsg>,
     /// A channel on which messages can be sent to the constellation from script.
-    pub constellation_chan: ConstellationChan<ScriptMsg>,
+    pub constellation_chan: IpcSender<ScriptMsg>,
     /// A channel for the layout thread to send messages to the constellation.
-    pub layout_to_constellation_chan: ConstellationChan<LayoutMsg>,
+    pub layout_to_constellation_chan: IpcSender<LayoutMsg>,
     /// A channel to schedule timer events.
     pub scheduler_chan: IpcSender<TimerEventRequest>,
-    /// Information that script sends out when it panics.
-    pub failure_info: Failure,
     /// A channel to the resource manager thread.
     pub resource_thread: ResourceThread,
     /// A channel to the storage thread.

@@ -59,7 +59,7 @@ use js::rust::Runtime;
 use layout_interface::{ReflowQueryType};
 use layout_interface::{self, LayoutChan, NewLayoutThreadInfo, ScriptLayoutChan};
 use mem::heap_size_of_self_and_children;
-use msg::constellation_msg::{ConstellationChan, LoadData};
+use msg::constellation_msg::{LoadData};
 use msg::constellation_msg::{PipelineId, PipelineNamespace};
 use msg::constellation_msg::{SubpageId, WindowSizeData};
 use msg::webdriver_msg::WebDriverScriptCommand;
@@ -346,10 +346,10 @@ pub struct ScriptThread {
     control_port: Receiver<ConstellationControlMsg>,
 
     /// For communicating load url messages to the constellation
-    constellation_chan: ConstellationChan<ConstellationMsg>,
+    constellation_chan: IpcSender<ConstellationMsg>,
 
     /// For communicating layout messages to the constellation
-    layout_to_constellation_chan: ConstellationChan<LayoutMsg>,
+    layout_to_constellation_chan: IpcSender<LayoutMsg>,
 
     /// A handle to the compositor for communicating ready state messages.
     compositor: DOMRefCell<IpcSender<ScriptToCompositorMsg>>,
@@ -442,7 +442,6 @@ impl ScriptThreadFactory for ScriptThread {
               state: InitialScriptState,
               layout_chan: &OpaqueScriptLayoutChannel,
               load_data: LoadData) {
-        let ConstellationChan(const_chan) = state.constellation_chan.clone();
         let (script_chan, script_port) = channel();
         let layout_chan = LayoutChan(layout_chan.sender());
         let failure_info = state.failure_info.clone();
@@ -1121,7 +1120,6 @@ impl ScriptThread {
         let handler = box DocumentProgressHandler::new(addr.clone());
         self.dom_manipulation_task_source.queue(DOMManipulationTask::DocumentProgress(handler)).unwrap();
 
-        let ConstellationChan(ref chan) = self.constellation_chan;
         chan.send(ConstellationMsg::LoadComplete(pipeline)).unwrap();
     }
 
@@ -1384,7 +1382,6 @@ impl ScriptThread {
             chan.send(layout_interface::Msg::SetFinalUrl(final_url.clone())).unwrap();
 
             // update the pipeline url
-            let ConstellationChan(ref chan) = self.constellation_chan;
             chan.send(ConstellationMsg::SetFinalUrl(incomplete.pipeline_id, final_url.clone())).unwrap();
         }
         debug!("ScriptThread: loading {} on page {:?}", incomplete.url.serialize(), incomplete.pipeline_id);
@@ -1548,7 +1545,6 @@ impl ScriptThread {
             window: JS::from_rooted(&window),
         }));
 
-        let ConstellationChan(ref chan) = self.constellation_chan;
         chan.send(ConstellationMsg::ActivateDocument(incomplete.pipeline_id)).unwrap();
 
         // Notify devtools that a new script global exists.
@@ -1710,7 +1706,6 @@ impl ScriptThread {
                                            });
 
                         let event = ConstellationMsg::NodeStatus(status);
-                        let ConstellationChan(ref chan) = self.constellation_chan;
                         chan.send(event).unwrap();
 
                         state_already_changed = true;
@@ -1725,7 +1720,6 @@ impl ScriptThread {
                                                .filter_map(Root::downcast::<HTMLAnchorElement>)
                                                .next() {
                             let event = ConstellationMsg::NodeStatus(None);
-                            let ConstellationChan(ref chan) = self.constellation_chan;
                             chan.send(event).unwrap();
                         }
                     }
@@ -1825,7 +1819,6 @@ impl ScriptThread {
                 }
             }
             None => {
-                let ConstellationChan(ref const_chan) = self.constellation_chan;
                 const_chan.send(ConstellationMsg::LoadUrl(pipeline_id, load_data)).unwrap();
             }
         }

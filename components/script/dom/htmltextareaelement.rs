@@ -25,7 +25,6 @@ use dom::node::{document_from_node};
 use dom::nodelist::NodeList;
 use dom::validation::Validatable;
 use dom::virtualmethods::VirtualMethods;
-use msg::constellation_msg::ConstellationChan;
 use range::Range;
 use script_traits::ScriptMsg as ConstellationMsg;
 use std::cell::Cell;
@@ -38,7 +37,7 @@ use util::str::DOMString;
 pub struct HTMLTextAreaElement {
     htmlelement: HTMLElement,
     #[ignore_heap_size_of = "#7193"]
-    textinput: DOMRefCell<TextInput<ConstellationChan<ConstellationMsg>>>,
+    textinput: DOMRefCell<TextInput<IpcSender<ConstellationMsg>>>,
     // https://html.spec.whatwg.org/multipage/#concept-textarea-dirty
     value_changed: Cell<bool>,
 }

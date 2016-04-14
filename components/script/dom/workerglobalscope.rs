@@ -20,7 +20,7 @@ use dom::workernavigator::WorkerNavigator;
 use ipc_channel::ipc::IpcSender;
 use js::jsapi::{HandleValue, JSAutoRequest, JSContext, JSRuntime};
 use js::rust::Runtime;
-use msg::constellation_msg::{ConstellationChan, PipelineId};
+use msg::constellation_msg::{PipelineId};
 use net_traits::{LoadContext, ResourceThread, load_whole_resource};
 use profile_traits::mem;
 use script_runtime::{CommonScriptMsg, ScriptChan, ScriptPort};
@@ -46,7 +46,7 @@ pub struct WorkerGlobalScopeInit {
     pub mem_profiler_chan: mem::ProfilerChan,
     pub to_devtools_sender: Option<IpcSender<ScriptToDevtoolsControlMsg>>,
     pub from_devtools_sender: Option<IpcSender<DevtoolScriptControlMsg>>,
-    pub constellation_chan: ConstellationChan<ConstellationMsg>,
+    pub constellation_chan: IpcSender<ConstellationMsg>,
     pub scheduler_chan: IpcSender<TimerEventRequest>,
     pub worker_id: WorkerId,
     pub closing: Arc<AtomicBool>,
@@ -89,7 +89,7 @@ pub struct WorkerGlobalScope {
     devtools_wants_updates: Cell<bool>,
 
     #[ignore_heap_size_of = "Defined in std"]
-    constellation_chan: ConstellationChan<ConstellationMsg>,
+    constellation_chan: IpcSender<ConstellationMsg>,
 
     #[ignore_heap_size_of = "Defined in std"]
     scheduler_chan: IpcSender<TimerEventRequest>,
@@ -142,7 +142,7 @@ impl WorkerGlobalScope {
         &self.from_devtools_receiver
     }
 
-    pub fn constellation_chan(&self) -> ConstellationChan<ConstellationMsg> {
+    pub fn constellation_chan(&self) -> IpcSender<ConstellationMsg> {
         self.constellation_chan.clone()
     }
 
