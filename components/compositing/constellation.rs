@@ -190,6 +190,9 @@ pub struct Constellation<LTF, STF> {
     /// Have we seen any panics? Hopefully always false!
     handled_panic: bool,
 
+    /// The number of currently presented alerts.
+    presented_alerts: u32,
+
     /// The random number generator and probability for closing pipelines.
     /// This is for testing the hardening of the constellation.
     random_pipeline_closure: Option<(StdRng, f32)>,
@@ -380,6 +383,7 @@ impl<LTF: LayoutThreadFactory, STF: ScriptThreadFactory> Constellation<LTF, STF>
                 document_states: HashMap::new(),
                 webrender_api_sender: state.webrender_api_sender,
                 handled_panic: false,
+                presented_alerts: 0,
                 random_pipeline_closure: opts::get().random_pipeline_closure_probability.map(|prob| {
                     let seed = opts::get().random_pipeline_closure_seed.unwrap_or_else(random);
                     let rng = StdRng::from_seed(&[seed]);
@@ -809,6 +813,10 @@ impl<LTF: LayoutThreadFactory, STF: ScriptThreadFactory> Constellation<LTF, STF>
                 debug!("constellation got Alert message");
                 self.handle_alert(pipeline_id, message, sender);
             }
+            Request::Script(FromScriptMsg::AlertDismissed(pipeline_id)) => {
+                debug!("constellation got AlertDismissed message");
+                self.handle_alert_dismissed(pipeline_id);
+            }
 
 
             // Messages from layout thread
@@ -1085,6 +1093,8 @@ impl<LTF: LayoutThreadFactory, STF: ScriptThreadFactory> Constellation<LTF, STF>
     }
 
     fn handle_alert(&mut self, pipeline_id: PipelineId, message: String, sender: IpcSender<bool>) {
+        debug!("Pipeline {} presenting an alert.", pipeline_id);
+        self.presented_alerts += 1;
         let display_alert_dialog = if prefs::get_pref("dom.mozbrowser.enabled").as_boolean().unwrap_or(false) {
             let parent_pipeline_info = self.pipelines.get(&pipeline_id).and_then(|source| source.parent_info);
             if let Some(_) = parent_pipeline_info {
@@ -1120,6 +1130,11 @@ impl<LTF: LayoutThreadFactory, STF: ScriptThreadFactory> Constellation<LTF, STF>
         if let Err(e) = result {
             self.handle_send_error(pipeline_id, e);
         }
+    }
+
+    fn handle_alert_dismissed(&mut self, pipeline_id: PipelineId) {
+        debug!("Pipeline {} dismissing an alert.", pipeline_id);
+        self.presented_alerts -= 1;
     }
 
     fn handle_load_url_msg(&mut self, source_id: PipelineId, load_data: LoadData) {
@@ -1485,6 +1500,58 @@ impl<LTF: LayoutThreadFactory, STF: ScriptThreadFactory> Constellation<LTF, STF>
     }
 
     fn handle_webdriver_msg(&mut self, msg: WebDriverCommandMsg) {
+        // Fail if there is an alert currently being presented
+        if self.presented_alerts > 0 {
+            match msg {
+                WebDriverCommandMsg::LoadUrl(_, _, reply) => {
+                    let _ = reply.send(0);
+                }
+            //     self.load_url_for_webdriver(pipeline_id, load_data, reply);
+            // },
+            // WebDriverCommandMsg::Refresh(pipeline_id, reply) => {
+            //     let load_data = match self.pipelines.get(&pipeline_id) {
+            //         Some(pipeline) => LoadData::new(pipeline.url.clone(), None, None),
+            //         None => return warn!("Pipeline {:?} Refresh after closure.", pipeline_id),
+            //     };
+            //     self.load_url_for_webdriver(pipeline_id, load_data, reply);
+            // }
+            // WebDriverCommandMsg::ScriptCommand(pipeline_id, cmd) => {
+            //     let control_msg = ConstellationControlMsg::WebDriverScriptCommand(pipeline_id, cmd);
+            //     let result = match self.pipelines.get(&pipeline_id) {
+            //         Some(pipeline) => pipeline.script_chan.send(control_msg),
+            //         None => return warn!("Pipeline {:?} ScriptCommand after closure.", pipeline_id),
+            //     };
+            //     if let Err(e) = result {
+            //         self.handle_send_error(pipeline_id, e);
+            //     }
+            // },
+            // WebDriverCommandMsg::SendKeys(pipeline_id, cmd) => {
+            //     let script_channel = match self.pipelines.get(&pipeline_id) {
+            //         Some(pipeline) => pipeline.script_chan.clone(),
+            //         None => return warn!("Pipeline {:?} SendKeys after closure.", pipeline_id),
+            //     };
+            //     for (key, mods, state) in cmd {
+            //         let event = CompositorEvent::KeyEvent(key, state, mods);
+            //         let control_msg = ConstellationControlMsg::SendEvent(pipeline_id, event);
+            //         if let Err(e) = script_channel.send(control_msg) {
+            //             return self.handle_send_error(pipeline_id, e);
+            //         }
+            //     }
+            // },
+            // WebDriverCommandMsg::TakeScreenshot(pipeline_id, reply) => {
+            //     let current_pipeline_id = self.root_frame_id
+            //         .and_then(|root_frame_id| self.frames.get(&root_frame_id))
+            //         .map(|root_frame| root_frame.current);
+            //     if Some(pipeline_id) == current_pipeline_id {
+            //         self.compositor_proxy.send(ToCompositorMsg::CreatePng(reply));
+            //     } else {
+            //         if let Err(e) = reply.send(None) {
+            //             warn!("Screenshot reply failed ({})", e);
+            //         }
+            //     }
+            // },
+            }
+        }
         // Find the script channel for the given parent pipeline,
         // and pass the event to that script thread.
         match msg {
