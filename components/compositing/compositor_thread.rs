@@ -296,6 +296,7 @@ impl CompositorThread {
 
 pub trait CompositorEventListener {
     fn handle_events(&mut self, events: Vec<WindowEvent>) -> bool;
+    fn wait_for_shutdown(&mut self);
     fn repaint_synchronously(&mut self);
     fn pinch_zoom_level(&self) -> f32;
     /// Requests that the compositor send the title for the main frame as soon as possible.

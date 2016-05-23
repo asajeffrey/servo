@@ -2511,6 +2511,14 @@ impl<Window> CompositorEventListener for IOCompositor<Window> where Window: Wind
         self.shutdown_state != ShutdownState::FinishedShuttingDown
     }
 
+    /// Block waiting until the compositor has finished shutting down
+    fn wait_for_shutdown(&mut self) {
+        while self.shutdown_state != ShutdownState::FinishedShuttingDown {
+            let msg = self.port.recv_compositor_msg();
+            self.handle_browser_message(msg);
+        }
+    }
+
     /// Repaints and recomposites synchronously. You must be careful when calling this, as if a
     /// paint is not scheduled the compositor will hang forever.
     ///

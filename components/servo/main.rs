@@ -75,7 +75,14 @@ fn main() {
     // Feed events from the window to the browser until the browser
     // says to stop.
     loop {
-        let should_continue = browser.browser.handle_events(window.wait_events());
+        let events = match window.wait_events() {
+            Some(events) => events,
+            None => {
+                browser.browser.wait_for_shutdown();
+                break;
+            }
+        };
+        let should_continue = browser.browser.handle_events(events);
         if !should_continue {
             break
         }

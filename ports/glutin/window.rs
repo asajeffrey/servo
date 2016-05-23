@@ -95,6 +95,7 @@ pub struct Window {
     mouse_down_button: Cell<Option<glutin::MouseButton>>,
     mouse_down_point: Cell<Point2D<i32>>,
     event_queue: RefCell<Vec<WindowEvent>>,
+    maybe_more_events: Cell<bool>,
 
     mouse_pos: Cell<Point2D<i32>>,
     key_modifiers: Cell<KeyModifiers>,
@@ -169,6 +170,7 @@ impl Window {
         let window = Window {
             window: glutin_window,
             event_queue: RefCell::new(vec!()),
+            maybe_more_events: Cell::new(true),
             mouse_down_button: Cell::new(None),
             mouse_down_point: Cell::new(Point2D::new(0, 0)),
 
@@ -367,6 +369,7 @@ impl Window {
         let event = match self.window.wait_events().next() {
             None => {
                 warn!("Window event stream closed.");
+                self.maybe_more_events = false;
                 return false;
             },
             Some(event) => event,
@@ -395,6 +398,7 @@ impl Window {
             let event = match self.window.wait_events().next() {
                 None => {
                     warn!("Window event stream closed.");
+                    self.maybe_more_events.set(false);
                     return false;
                 },
                 Some(event) => event,
@@ -441,7 +445,7 @@ impl Window {
         }
     }
 
-    pub fn wait_events(&self) -> Vec<WindowEvent> {
+    pub fn wait_events(&self) -> Option<Vec<WindowEvent>> {
         use std::mem;
 
         let mut events = mem::replace(&mut *self.event_queue.borrow_mut(), Vec::new());
@@ -462,8 +466,12 @@ impl Window {
             events.push(WindowEvent::Quit)
         }
 
+        if !self.maybe_more_events.get() {
+            return None;
+        }
+
         events.extend(mem::replace(&mut *self.event_queue.borrow_mut(), Vec::new()).into_iter());
-        events
+        Some(events)
     }
 
     pub unsafe fn set_nested_event_loop_listener(

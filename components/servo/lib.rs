@@ -188,6 +188,10 @@ impl Browser {
         self.compositor.handle_events(events)
     }
 
+    pub fn wait_for_shutdown(&mut self) {
+        self.compositor.wait_for_shutdown()
+    }
+
     pub fn repaint_synchronously(&mut self) {
         self.compositor.repaint_synchronously()
     }
