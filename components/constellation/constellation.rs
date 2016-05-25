@@ -220,16 +220,31 @@ pub struct InitialConstellationState {
     pub webrender_api_sender: Option<webrender_traits::RenderApiSender>,
 }
 
+/// Different types of frame
+#[derive(Copy, Clone, PartialEq, Debug)]
+pub enum FrameType {
+    /// a frame corresponding to a top-level browsing context
+    // TODO: include the shared navigation history here
+    // TODO: should we distinguish between the root browsing context and auxiliary browsing contexts?
+    TopLevel,
+    /// a frame corresponding to a child browsing context
+    Child(PipelineId, SubpageId),
+}
+
 /// Stores the navigation context for a single frame in the frame tree.
 struct Frame {
+    id: FrameId,
+    ty: FrameType,
     prev: Vec<PipelineId>,
     current: PipelineId,
     next: Vec<PipelineId>,
 }
 
 impl Frame {
-    fn new(pipeline_id: PipelineId) -> Frame {
+    fn new(id: FrameId, ty: FrameType, pipeline_id: PipelineId) -> Frame {
         Frame {
+            id: id,
+            ty: ty,
             prev: vec!(),
             current: pipeline_id,
             next: vec!(),
@@ -249,9 +264,17 @@ impl Frame {
 /// Represents a pending change in the frame tree, that will be applied
 /// once the new pipeline has loaded and completed initial layout / paint.
 struct FrameChange {
-    old_pipeline_id: Option<PipelineId>,
-    new_pipeline_id: PipelineId,
+    reason: FrameChangeReason,
+    pipeline_id: PipelineId,
     document_ready: bool,
+}
+
+/// Reason for changing the frame, either we are replacing a pipeline
+/// or creating a new frame.
+#[derive(Copy, Clone, PartialEq, Debug)]
+enum FrameChangeReason { 
+    Replace(PipelineId),
+    NewFrame(FrameType),
 }
 
 /// An iterator over a frame tree, returning nodes in depth-first order.
@@ -516,11 +539,10 @@ impl<LTF: LayoutThreadFactory, STF: ScriptThreadFactory> Constellation<LTF, STF>
     }
 
     // Push a new (loading) pipeline to the list of pending frame changes
-    fn push_pending_frame(&mut self, new_pipeline_id: PipelineId,
-                          old_pipeline_id: Option<PipelineId>) {
+    fn push_pending_frame(&mut self, pipeline_id: PipelineId, reason: FrameChangeReason) {
         self.pending_frames.push(FrameChange {
-            old_pipeline_id: old_pipeline_id,
-            new_pipeline_id: new_pipeline_id,
+            pipeline_id: pipeline_id,
+            reason: reason,
             document_ready: false,
         });
     }
@@ -536,12 +558,12 @@ impl<LTF: LayoutThreadFactory, STF: ScriptThreadFactory> Constellation<LTF, STF>
     }
 
     // Create a new frame and update the internal bookkeeping.
-    fn new_frame(&mut self, pipeline_id: PipelineId) -> FrameId {
+    fn new_frame(&mut self, ty: FrameType, pipeline_id: PipelineId) -> FrameId {
         let id = self.next_frame_id;
         let FrameId(ref mut i) = self.next_frame_id;
         *i += 1;
 
-        let frame = Frame::new(pipeline_id);
+        let frame = Frame::new(id, ty, pipeline_id);
 
         assert!(!self.pipeline_to_frame_map.contains_key(&pipeline_id));
         assert!(!self.frames.contains_key(&id));
@@ -892,8 +914,8 @@ impl<LTF: LayoutThreadFactory, STF: ScriptThreadFactory> Constellation<LTF, STF>
             self.close_pipeline(pipeline_id, ExitPipelineMode::Force);
 
             while let Some(pending_pipeline_id) = self.pending_frames.iter().find(|pending| {
-                pending.old_pipeline_id == Some(pipeline_id)
-            }).map(|frame| frame.new_pipeline_id) {
+                pending.reason == FrameChangeReason::Replace(pipeline_id)
+            }).map(|pending| pending.pipeline_id) {
                 warn!("removing pending frame change for failed pipeline");
                 self.close_pipeline(pending_pipeline_id, ExitPipelineMode::Force);
             }
@@ -907,7 +929,7 @@ impl<LTF: LayoutThreadFactory, STF: ScriptThreadFactory> Constellation<LTF, STF>
                               None,
                               LoadData::new(Url::parse("about:failure").expect("infallible"), None, None));
 
-            self.push_pending_frame(new_pipeline_id, Some(pipeline_id));
+            self.push_pending_frame(new_pipeline_id, FrameChangeReason::Replace(pipeline_id));
 
         }
 
@@ -920,7 +942,7 @@ impl<LTF: LayoutThreadFactory, STF: ScriptThreadFactory> Constellation<LTF, STF>
         debug_assert!(PipelineId::fake_root_pipeline_id() == root_pipeline_id);
         self.new_pipeline(root_pipeline_id, None, Some(window_size), None, LoadData::new(url.clone(), None, None));
         self.handle_load_start_msg(&root_pipeline_id);
-        self.push_pending_frame(root_pipeline_id, None);
+        self.push_pending_frame(root_pipeline_id, FrameChangeReason::NewFrame(FrameType::TopLevel));
         self.compositor_proxy.send(ToCompositorMsg::ChangePageUrl(root_pipeline_id, url));
     }
 
@@ -1046,7 +1068,14 @@ impl<LTF: LayoutThreadFactory, STF: ScriptThreadFactory> Constellation<LTF, STF>
         self.subpage_map.insert((load_info.containing_pipeline_id, load_info.new_subpage_id),
                                 load_info.new_pipeline_id);
 
-        self.push_pending_frame(load_info.new_pipeline_id, old_pipeline_id);
+        // TODO: what if script creates a frame for a new top-level browsing context?
+        // In particular, browser.html may create new mozbrowser iframes.
+        let frame_type = FrameType::Child(load_info.containing_pipeline_id, load_info.new_subpage_id);
+        let frame_change_reason = match old_pipeline_id {
+            Some(old_pipeline_id) => FrameChangeReason::Replace(old_pipeline_id),
+            None => FrameChangeReason::NewFrame(frame_type),
+        };
+        self.push_pending_frame(load_info.new_pipeline_id, frame_change_reason);
     }
 
     fn handle_set_cursor_msg(&mut self, cursor: Cursor) {
@@ -1151,7 +1180,7 @@ impl<LTF: LayoutThreadFactory, STF: ScriptThreadFactory> Constellation<LTF, STF>
             None => {
                 // Make sure no pending page would be overridden.
                 for frame_change in &self.pending_frames {
-                    if frame_change.old_pipeline_id == Some(source_id) {
+                    if frame_change.reason == FrameChangeReason::Replace(source_id) {
                         // id that sent load msg is being changed already; abort
                         return None;
                     }
@@ -1172,8 +1201,9 @@ impl<LTF: LayoutThreadFactory, STF: ScriptThreadFactory> Constellation<LTF, STF>
                 // Create the new pipeline
                 let window_size = self.pipelines.get(&source_id).and_then(|source| source.size);
                 let new_pipeline_id = PipelineId::new();
+                let frame_change_reason = FrameChangeReason::Replace(source_id);
                 self.new_pipeline(new_pipeline_id, None, window_size, None, load_data);
-                self.push_pending_frame(new_pipeline_id, Some(source_id));
+                self.push_pending_frame(new_pipeline_id, frame_change_reason);
 
                 // Send message to ScriptThread that will suspend all timers
                 match self.pipelines.get(&source_id) {
@@ -1389,15 +1419,14 @@ impl<LTF: LayoutThreadFactory, STF: ScriptThreadFactory> Constellation<LTF, STF>
 
     fn handle_get_pipeline(&mut self, frame_id: Option<FrameId>,
                            resp_chan: IpcSender<Option<(PipelineId, bool)>>) {
-        let current_pipeline_id = frame_id.or(self.root_frame_id)
+        let pipeline_id_loaded = frame_id.or(self.root_frame_id)
             .and_then(|frame_id| self.frames.get(&frame_id))
-            .map(|frame| frame.current);
-        let current_pipeline_id_loaded = current_pipeline_id
-            .map(|id| (id, true));
-        let pipeline_id_loaded = self.pending_frames.iter().rev()
-            .find(|x| x.old_pipeline_id == current_pipeline_id)
-            .map(|x| (x.new_pipeline_id, x.document_ready))
-            .or(current_pipeline_id_loaded);
+            .map(|frame| {
+                self.pending_frames.iter().rev()
+                    .find(|change| change.reason == FrameChangeReason::Replace(frame.current))
+                    .map(|change| (change.pipeline_id, change.document_ready))
+                    .unwrap_or((frame.current, true))
+            });
         if let Err(e) = resp_chan.send(pipeline_id_loaded) {
             warn!("Failed get_pipeline response ({}).", e);
         }
@@ -1553,55 +1582,68 @@ impl<LTF: LayoutThreadFactory, STF: ScriptThreadFactory> Constellation<LTF, STF>
 
     fn add_or_replace_pipeline_in_frame_tree(&mut self, frame_change: FrameChange) {
 
-        // If the currently focused pipeline is the one being changed (or a child
+        // If th currently focused pipeline is the one being changed (or a child
         // of the pipeline being changed) then update the focus pipeline to be
         // the replacement.
-        if let Some(old_pipeline_id) = frame_change.old_pipeline_id {
+        if let FrameChangeReason::Replace(old_pipeline_id) = frame_change.reason {
             if let Some(&old_frame_id) = self.pipeline_to_frame_map.get(&old_pipeline_id) {
                 if self.focused_pipeline_in_tree(old_frame_id) {
-                    self.focus_pipeline_id = Some(frame_change.new_pipeline_id);
+                    self.focus_pipeline_id = Some(frame_change.pipeline_id);
                 }
             }
         }
 
-        let evicted_frames = frame_change.old_pipeline_id.and_then(|old_pipeline_id| {
-            // The new pipeline is replacing an old one.
-            // Remove paint permissions for the pipeline being replaced.
-            self.revoke_paint_permission(old_pipeline_id);
+        let evicted_frames = match frame_change.reason {
+            FrameChangeReason::Replace(old_pipeline_id) => {
+                // The new pipeline is replacing an old one.
+                // Remove paint permissions for the pipeline being replaced.
+                self.revoke_paint_permission(old_pipeline_id);
 
-            // Add new pipeline to navigation frame, and return frames evicted from history.
-            self.pipeline_to_frame_map.get(&old_pipeline_id).cloned()
-                .and_then(|frame_id| {
-                    self.pipeline_to_frame_map.insert(frame_change.new_pipeline_id, frame_id);
-                    self.frames.get_mut(&frame_id)
-                }).map(|frame| frame.load(frame_change.new_pipeline_id))
-        });
+                // Add new pipeline to navigation frame, and return frames evicted from history.
+                self.pipeline_to_frame_map.get(&old_pipeline_id).cloned()
+                    .and_then(|frame_id| {
+                        self.pipeline_to_frame_map.insert(frame_change.pipeline_id, frame_id);
+                        self.frames.get_mut(&frame_id)
+                    }).map(|frame| frame.load(frame_change.pipeline_id))
+            },
+            FrameChangeReason::NewFrame(frame_type) => {
+                // The new pipeline is in a new frame with no history
+                let frame_id = self.new_frame(frame_type, frame_change.pipeline_id);
 
-        if let None = evicted_frames {
-            // The new pipeline is in a new frame with no history
-            let frame_id = self.new_frame(frame_change.new_pipeline_id);
-
-            // If a child frame, add it to the parent pipeline. Otherwise
-            // it must surely be the root frame being created!
-            match self.pipelines.get(&frame_change.new_pipeline_id).and_then(|pipeline| pipeline.parent_info) {
-                Some((parent_id, _)) => {
-                    if let Some(parent) = self.pipelines.get_mut(&parent_id) {
-                        parent.add_child(frame_id);
+                // If a child frame, add it to the parent pipeline. Otherwise
+                // we assume that the first top-level frame to be added is the root frame.
+                match frame_type {
+                    FrameType::Child(parent_id, _) => {
+                        if let Some(parent) = self.pipelines.get_mut(&parent_id) {
+                            parent.add_child(frame_id);
+                        }
+                    }
+                    FrameType::TopLevel => {
+                        if let Some(root_frame_id) = self.root_frame_id {
+                            if let Some(root_frame) = self.frames.get(&root_frame_id) {
+                                if let Some(root_pipeline) = self.pipelines.get_mut(&root_frame.current) {
+                                    // TODO: should we store the auxiliary browsing contexts
+                                    // somewhere else?
+                                    root_pipeline.add_child(frame_id);
+                                }
+                            }
+                        } else {
+                            self.root_frame_id = Some(frame_id);
+                        }
                     }
                 }
-                None => {
-                    assert!(self.root_frame_id.is_none());
-                    self.root_frame_id = Some(frame_id);
-                }
+
+                // There are no evicted frames
+                None
             }
-        }
+        };
 
         // Build frame tree and send permission
         self.send_frame_tree_and_grant_paint_permission();
 
         // If this is an iframe, send a mozbrowser location change event.
         // This is the result of a link being clicked and a navigation completing.
-        self.trigger_mozbrowserlocationchange(frame_change.new_pipeline_id);
+        self.trigger_mozbrowserlocationchange(frame_change.pipeline_id);
 
         // Remove any evicted frames
         for pipeline_id in evicted_frames.unwrap_or_default() {
@@ -1633,7 +1675,7 @@ impl<LTF: LayoutThreadFactory, STF: ScriptThreadFactory> Constellation<LTF, STF>
         // Find the pending frame change whose new pipeline id is pipeline_id.
         // If it is found, mark this pending frame as ready to be enabled.
         let pending_index = self.pending_frames.iter().rposition(|frame_change| {
-            frame_change.new_pipeline_id == pipeline_id
+            frame_change.pipeline_id == pipeline_id
         });
         if let Some(pending_index) = pending_index {
             self.pending_frames[pending_index].document_ready = true;
@@ -1649,9 +1691,10 @@ impl<LTF: LayoutThreadFactory, STF: ScriptThreadFactory> Constellation<LTF, STF>
         // frames, we can safely exit the loop, knowing that we will need to wait on
         // a dependent pipeline to be ready to paint.
         while let Some(valid_frame_change) = self.pending_frames.iter().rposition(|frame_change| {
-            let waiting_on_dependency = frame_change.old_pipeline_id.map_or(false, |old_pipeline_id| {
-                self.pipeline_to_frame_map.get(&old_pipeline_id).is_none()
-            });
+            let waiting_on_dependency = match frame_change.reason {
+                FrameChangeReason::Replace(old_pipeline_id) => self.pipeline_to_frame_map.get(&old_pipeline_id).is_none(),
+                FrameChangeReason::NewFrame(_) => false,
+            };
             frame_change.document_ready && !waiting_on_dependency
         }) {
             let frame_change = self.pending_frames.swap_remove(valid_frame_change);
@@ -1698,7 +1741,7 @@ impl<LTF: LayoutThreadFactory, STF: ScriptThreadFactory> Constellation<LTF, STF>
 
         // Send resize message to any pending pipelines that aren't loaded yet.
         for pending_frame in &self.pending_frames {
-            let pipeline_id = pending_frame.new_pipeline_id;
+            let pipeline_id = pending_frame.pipeline_id;
             let pipeline = match self.pipelines.get(&pipeline_id) {
                 None => { warn!("Pending pipeline {:?} is closed", pipeline_id); continue; }
                 Some(pipeline) => pipeline,
@@ -1921,7 +1964,7 @@ impl<LTF: LayoutThreadFactory, STF: ScriptThreadFactory> Constellation<LTF, STF>
 
         // Remove this pipeline from pending frames if it hasn't loaded yet.
         let pending_index = self.pending_frames.iter().position(|frame_change| {
-            frame_change.new_pipeline_id == pipeline_id
+            frame_change.pipeline_id == pipeline_id
         });
         if let Some(pending_index) = pending_index {
             self.pending_frames.remove(pending_index);
