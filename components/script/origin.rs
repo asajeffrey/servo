@@ -41,9 +41,33 @@ impl Origin {
         }
     }
 
+    /// Return the domain associated with this origin.
+    /// TODO: implement setting the domain.
+    pub fn domain(&self) -> Option<&str> {
+        None
+    }
+
     /// https://html.spec.whatwg.org/multipage/#same-origin
     pub fn same_origin(&self, other: &Origin) -> bool {
         self.inner == other.inner
+    }
+
+    /// https://html.spec.whatwg.org/multipage/#same-origin-domain
+    pub fn same_origin_domain(&self, other: &Origin) -> bool {
+        match (&*self.inner, self.domain(), &*other.inner, other.domain()) {
+            // Step 1.
+            (&UrlOrigin::Opaque(ref opaqueA), _, &UrlOrigin::Opaque(ref opaqueB), _) =>
+                opaqueA == opaqueB,
+            // Step 2.1.
+            (&UrlOrigin::Tuple(ref schA, _, _), Some(domA), &UrlOrigin::Tuple(ref schB, _, _), Some(domB)) =>
+                (schA == sch0B) && (domA == domB),
+            // Step 2.2.
+            (&UrlOrigin::Tuple(_, _, _), None, &UrlOrigin::Tuple(_, _, _), None) =>
+                self.same_origin(other),
+            // Step 3.
+            _ =>
+                false,
+        }
     }
 
     pub fn copy(&self) -> Origin {

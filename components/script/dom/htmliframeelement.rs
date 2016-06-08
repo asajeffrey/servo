@@ -72,6 +72,22 @@ impl HTMLIFrameElement {
         self.sandbox.get().is_some()
     }
 
+    // Checks if the iframe's contents is same-origin with the iframe.
+    // Note that we have to do this dynamically, because the content script
+    // may set document.domain.
+    fn is_same_origin(&self) -> bool {
+        // TODO: check the sandbox
+        self.subpage_id.get()
+            .and_then(|subpage_id| {
+                window_from_node(self).browsing_context().find_child_by_subpage(subpage_id)
+            })
+            .map(|child_window| {
+                document_from_node(self).origin()
+                    child_window.browsing_context().active_document().origin())
+            })
+            .unwrap_or(false)
+    }
+
     /// <https://html.spec.whatwg.org/multipage/#otherwise-steps-for-iframe-or-frame-elements>,
     /// step 1.
     fn get_url(&self) -> Url {
@@ -577,14 +593,7 @@ impl VirtualMethods for HTMLIFrameElement {
             //
             // Since most of this cleanup doesn't happen on same-origin
             // iframes, and since that would cause a deadlock, don't do it.
-            let same_origin = {
-                // FIXME(#10968): this should probably match the origin check in
-                //                HTMLIFrameElement::contentDocument.
-                let self_url = self.get_url();
-                let win_url = window_from_node(self).get_url();
-                UrlHelper::SameOrigin(&self_url, &win_url)
-            };
-            let (sender, receiver) = if same_origin {
+            let (sender, receiver) = if self.is_same_origin() {
                 (None, None)
             } else {
                 let (sender, receiver) = ipc::channel().unwrap();

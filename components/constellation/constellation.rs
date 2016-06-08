@@ -1034,6 +1034,10 @@ impl<Message, LTF, STF> Constellation<Message, LTF, STF>
 
             // FIXME(#10968): this should probably match the origin check in
             //                HTMLIFrameElement::contentDocument.
+            // This should use the Public Suffix List, to ensure that
+            // even if a script changes its domain by setting document.domain,
+            // it can't change which script thread it is executing in.
+            // https://html.spec.whatwg.org/multipage/#relaxing-the-same-origin-restriction
             let same_script = source_url.host() == load_data.url.host() &&
                               source_url.port() == load_data.url.port() &&
                               load_info.sandbox == IFrameSandboxState::IFrameUnsandboxed;

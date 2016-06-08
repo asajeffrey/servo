@@ -368,6 +368,11 @@ impl Document {
         }
     }
 
+    // https://html.spec.whatwg.org/multipage/#concept-origin
+    pub fn origin(&self) -> &Origin {
+        &self.origin
+    }
+
     pub fn needs_reflow(&self) -> bool {
         // FIXME: This should check the dirty bit on the document,
         // not the document element. Needs some layout changes to make

@@ -31,7 +31,7 @@ use dom::element::Element;
 use dom::eventtarget::EventTarget;
 use dom::location::Location;
 use dom::navigator::Navigator;
-use dom::node::{Node, TrustedNodeAddress, from_untrusted_node_address, window_from_node};
+use dom::node::{Node, TrustedNodeAddress, document_from_node, from_untrusted_node_address, window_from_node};
 use dom::performance::Performance;
 use dom::screen::Screen;
 use dom::storage::Storage;
@@ -499,7 +499,23 @@ impl WindowMethods for Window {
 
     // https://html.spec.whatwg.org/multipage/#dom-frameelement
     fn GetFrameElement(&self) -> Option<Root<Element>> {
-        self.browsing_context().frame_element().map(Root::from_ref)
+        match self.browsing_context().frame_element() {
+            // Step 3
+            None => None,
+            // Step 4
+            Some(container) => {
+                // TODO: should be "the entry settings object's origin".
+                let same_origin_domain = self.browsing_context().active_document().origin()
+                    .same_origin_domain(document_from_node(container).origin());
+                // Step 5
+                if !same_origin_domain {
+                    None
+                } else {
+                    // Step 6
+                    Some(Root::from_ref(container))
+                }
+            },
+        }
     }
 
     // https://html.spec.whatwg.org/multipage/#dom-navigator
