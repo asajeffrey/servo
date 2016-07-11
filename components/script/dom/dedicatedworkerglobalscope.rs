@@ -157,8 +157,10 @@ impl DedicatedWorkerGlobalScope {
                             worker_load_origin: WorkerScriptLoadOrigin) {
         let serialized_worker_url = worker_url.to_string();
         let name = format!("WebWorker for {}", serialized_worker_url);
-        let panic_chan = init.panic_chan.clone();
-        spawn_named_with_send_on_panic(name, SCRIPT | IN_WORKER, move || {
+        spawn_named_with_send_on_panic(name, move || {
+            thread_state::initialize(thread_state::SCRIPT | thread_state::IN_WORKER);
+            PipelineId::install(id);
+
             let roots = RootCollection::new();
             let _stack_roots_tls = StackRootTLS::new(&roots);
             let (url, source) = match load_whole_resource(LoadContext::Script,
@@ -221,7 +223,7 @@ impl DedicatedWorkerGlobalScope {
                     global.handle_event(event);
                 }
             }, reporter_name, parent_sender, CommonScriptMsg::CollectReports);
-        }, Some(id.clone()), panic_chan);
+        });
     }
 
     pub fn script_chan(&self) -> Box<ScriptChan + Send> {

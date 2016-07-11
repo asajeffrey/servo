@@ -452,6 +452,9 @@ impl ScriptThreadFactory for ScriptThread {
         thread::spawn_named_with_send_on_panic(format!("ScriptThread {:?}", state.id),
                                                thread_state::SCRIPT,
                                                move || {
+
+            thread_state::initialize(thread_state::SCRIPT);
+            PipelineId::install(id);
             PipelineNamespace::install(state.pipeline_namespace_id);
             let roots = RootCollection::new();
             let _stack_roots_tls = StackRootTLS::new(&roots);
