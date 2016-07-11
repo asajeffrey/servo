@@ -26,7 +26,6 @@ extern crate backtrace;
 extern crate glutin_app as app;
 #[cfg(target_os = "android")]
 extern crate libc;
-#[cfg(target_os = "android")]
 #[macro_use]
 extern crate log;
 // The Servo engine
@@ -38,7 +37,6 @@ extern crate sig;
 use servo::Browser;
 use servo::compositing::windowing::WindowEvent;
 use servo::util::opts::{self, ArgumentParsingResult};
-use servo::util::panicking::initiate_panic_hook;
 use servo::util::servo_version;
 use std::process;
 use std::rc::Rc;
@@ -94,7 +92,7 @@ fn main() {
         None
     };
 
-    initiate_panic_hook();
+    log::log_panics();
     setup_logging();
 
     if let Some(token) = content_process_token {

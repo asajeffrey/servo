@@ -30,7 +30,7 @@ use msg::constellation_msg::{FrameId, FrameType, PipelineId};
 use msg::constellation_msg::{Key, KeyModifiers, KeyState, LoadData};
 use msg::constellation_msg::{PipelineNamespace, PipelineNamespaceId, NavigationDirection};
 use msg::constellation_msg::{SubpageId, WindowSizeType};
-use msg::constellation_msg::{self, PanicMsg};
+use msg::constellation_msg;
 use net_traits::bluetooth_thread::BluetoothMethodMsg;
 use net_traits::filemanager_thread::FileManagerThreadMsg;
 use net_traits::image_cache_thread::ImageCacheThread;
@@ -91,9 +91,6 @@ pub struct Constellation<Message, LTF, STF> {
     /// A channel through which layout thread messages can be sent to this object.
     layout_sender: IpcSender<FromLayoutMsg>,
 
-    /// A channel through which panic messages can be sent to this object.
-    panic_sender: IpcSender<PanicMsg>,
-
     /// Receives messages from scripts.
     script_receiver: Receiver<FromScriptMsg>,
 
@@ -102,9 +99,6 @@ pub struct Constellation<Message, LTF, STF> {
 
     /// Receives messages from the layout thread
     layout_receiver: Receiver<FromLayoutMsg>,
-
-    /// Receives panic messages.
-    panic_receiver: Receiver<PanicMsg>,
 
     /// A channel (the implementation of which is port-specific) through which messages can be sent
     /// to the compositor.
@@ -182,9 +176,6 @@ pub struct Constellation<Message, LTF, STF> {
 
     /// Are we shutting down?
     shutting_down: bool,
-
-    /// Have we seen any panics? Hopefully always false!
-    handled_panic: bool,
 
     /// Have we seen any warnings? Hopefully always empty!
     /// The buffer contains `(thread_name, reason)` entries.
@@ -417,17 +408,12 @@ impl<Message, LTF, STF> Constellation<Message, LTF, STF>
             let (ipc_layout_sender, ipc_layout_receiver) = ipc::channel().expect("ipc channel failure");
             let layout_receiver = ROUTER.route_ipc_receiver_to_new_mpsc_receiver(ipc_layout_receiver);
 
-            let (ipc_panic_sender, ipc_panic_receiver) = ipc::channel().expect("ipc channel failure");
-            let panic_receiver = ROUTER.route_ipc_receiver_to_new_mpsc_receiver(ipc_panic_receiver);
-
             let mut constellation: Constellation<Message, LTF, STF> = Constellation {
                 script_sender: ipc_script_sender,
                 layout_sender: ipc_layout_sender,
                 script_receiver: script_receiver,
-                panic_sender: ipc_panic_sender,
                 compositor_receiver: compositor_receiver,
                 layout_receiver: layout_receiver,
-                panic_receiver: panic_receiver,
                 compositor_proxy: state.compositor_proxy,
                 devtools_chan: state.devtools_chan,
                 bluetooth_thread: state.bluetooth_thread,
@@ -465,7 +451,6 @@ impl<Message, LTF, STF> Constellation<Message, LTF, STF>
                 document_states: HashMap::new(),
                 webrender_api_sender: state.webrender_api_sender,
                 shutting_down: false,
-                handled_panic: false,
                 handled_warnings: VecDeque::new(),
                 random_pipeline_closure: opts::get().random_pipeline_closure_probability.map(|prob| {
                     let seed = opts::get().random_pipeline_closure_seed.unwrap_or_else(random);
@@ -526,7 +511,6 @@ impl<Message, LTF, STF> Constellation<Message, LTF, STF>
             parent_info: parent_info,
             constellation_chan: self.script_sender.clone(),
             layout_to_constellation_chan: self.layout_sender.clone(),
-            panic_chan: self.panic_sender.clone(),
             scheduler_chan: self.scheduler_chan.clone(),
             compositor_proxy: self.compositor_proxy.clone_compositor_proxy(),
             devtools_chan: self.devtools_chan.clone(),
@@ -603,7 +587,6 @@ impl<Message, LTF, STF> Constellation<Message, LTF, STF>
             Script(FromScriptMsg),
             Compositor(FromCompositorMsg),
             Layout(FromLayoutMsg),
-            Panic(PanicMsg),
         }
 
         // Get one incoming request.
@@ -621,16 +604,13 @@ impl<Message, LTF, STF> Constellation<Message, LTF, STF>
             let receiver_from_script = &self.script_receiver;
             let receiver_from_compositor = &self.compositor_receiver;
             let receiver_from_layout = &self.layout_receiver;
-            let receiver_from_panic = &self.panic_receiver;
             select! {
                 msg = receiver_from_script.recv() =>
                     Request::Script(msg.expect("Unexpected script channel panic in constellation")),
                 msg = receiver_from_compositor.recv() =>
                     Request::Compositor(msg.expect("Unexpected compositor channel panic in constellation")),
                 msg = receiver_from_layout.recv() =>
-                    Request::Layout(msg.expect("Unexpected layout channel panic in constellation")),
-                msg = receiver_from_panic.recv() =>
-                    Request::Panic(msg.expect("Unexpected panic channel panic in constellation"))
+                    Request::Layout(msg.expect("Unexpected layout channel panic in constellation"))
             }
         };
 
@@ -643,9 +623,6 @@ impl<Message, LTF, STF> Constellation<Message, LTF, STF>
             },
             Request::Layout(message) => {
                 self.handle_request_from_layout(message);
-            },
-            Request::Panic(message) => {
-                self.handle_request_from_panic(message);
             },
         }
     }
@@ -938,15 +915,6 @@ impl<Message, LTF, STF> Constellation<Message, LTF, STF>
         }
     }
 
-    fn handle_request_from_panic(&mut self, message: PanicMsg) {
-        match message {
-            (pipeline_id, panic_reason, backtrace) => {
-                debug!("handling panic message ({:?})", pipeline_id);
-                self.handle_panic(pipeline_id, panic_reason, backtrace);
-            }
-        }
-    }
-
     fn handle_exit(&mut self) {
         // TODO: add a timer, which forces shutdown if threads aren't responsive.
         if self.shutting_down { return; }
@@ -1023,14 +991,6 @@ impl<Message, LTF, STF> Constellation<Message, LTF, STF>
     }
 
     fn handle_panic(&mut self, pipeline_id: Option<PipelineId>, reason: String, backtrace: String) {
-        error!("Panic: {}", reason);
-        if !self.handled_panic || opts::get().full_backtraces {
-            // For the first panic, we print the full backtrace
-            error!("Backtrace:\n{}", backtrace);
-        } else {
-            error!("Backtrace skipped (run with -Z full-backtraces to see every backtrace).");
-        }
-
         if opts::get().hard_fail {
             // It's quite difficult to make Servo exit cleanly if some threads have failed.
             // Hard fail exists for test runners so we crash and that's good enough.
@@ -1075,8 +1035,6 @@ impl<Message, LTF, STF> Constellation<Message, LTF, STF>
             self.push_pending_frame(new_pipeline_id, Some(pipeline_id));
 
         }
-
-        self.handled_panic = true;
     }
 
     // TODO: trigger a mozbrowsererror even if there's no pipeline id

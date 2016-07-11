@@ -38,8 +38,8 @@ use std::mem::replace;
 use std::sync::mpsc::{Receiver, RecvError, Select, Sender, channel};
 use std::sync::{Arc, Mutex};
 use url::Url;
-use util::thread::spawn_named_with_send_on_panic;
-use util::thread_state::{IN_WORKER, SCRIPT};
+use util::thread::spawn_named;
+use util::thread_state;
 
 /// Set the `worker` field of a related DedicatedWorkerGlobalScope object to a particular
 /// value for the duration of this object's lifetime. This ensures that the related Worker
@@ -157,7 +157,7 @@ impl DedicatedWorkerGlobalScope {
                             worker_load_origin: WorkerScriptLoadOrigin) {
         let serialized_worker_url = worker_url.to_string();
         let name = format!("WebWorker for {}", serialized_worker_url);
-        spawn_named_with_send_on_panic(name, move || {
+        spawn_named(name, move || {
             thread_state::initialize(thread_state::SCRIPT | thread_state::IN_WORKER);
             PipelineId::install(id);
 

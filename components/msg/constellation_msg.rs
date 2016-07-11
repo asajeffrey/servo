@@ -13,8 +13,6 @@ use std::fmt;
 use url::Url;
 use webrender_traits;
 
-pub type PanicMsg = (Option<PipelineId>, String, String);
-
 #[derive(Deserialize, Eq, PartialEq, Serialize, Copy, Clone, HeapSizeOf)]
 pub enum WindowSizeType {
     Initial,

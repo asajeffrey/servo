@@ -59,7 +59,7 @@ ipc-channel = {git = "https://github.com/servo/ipc-channel"}
 layout = {path = "../layout"}
 layout_thread = {path = "../layout_thread"}
 libc = "0.2"
-log = "0.3"
+log = {version = "0.3", features = ["nightly"]} # log_panics requires nightly
 msg = {path = "../msg"}
 net = {path = "../net"}
 net_traits = {path = "../net_traits"}
