@@ -65,6 +65,7 @@ use timer_scheduler::TimerScheduler;
 use url::Url;
 use util::opts;
 use util::prefs::PREFS;
+use util::remutex::ReentrantMutex;
 use util::thread::spawn_named;
 use webrender_traits;
 
@@ -314,14 +315,14 @@ enum ExitPipelineMode {
 #[derive(Clone)]
 pub struct FromScriptLogger {
     /// A channel to the constellation
-    pub constellation_chan: Arc<Mutex<IpcSender<FromScriptMsg>>>,
+    pub constellation_chan: Arc<ReentrantMutex<IpcSender<FromScriptMsg>>>,
 }
 
 impl FromScriptLogger {
     /// Create a new constellation logger.
     pub fn new(constellation_chan: IpcSender<FromScriptMsg>) -> FromScriptLogger {
         FromScriptLogger {
-            constellation_chan: Arc::new(Mutex::new(constellation_chan))
+            constellation_chan: Arc::new(ReentrantMutex::new(constellation_chan))
         }
     }
 
@@ -353,7 +354,7 @@ impl Log for FromScriptLogger {
 #[derive(Clone)]
 pub struct FromCompositorLogger {
     /// A channel to the constellation
-    pub constellation_chan: Arc<Mutex<Sender<FromCompositorMsg>>>,
+    pub constellation_chan: Arc<ReentrantMutex<Sender<FromCompositorMsg>>>,
 }
 
 impl FromCompositorLogger {
