@@ -10,14 +10,16 @@
 //! It provides the same interface as https://github.com/rust-lang/rust/blob/master/src/libstd/sys/common/remutex.rs
 //! so if those types are ever exported, we should be able to replace this implemtation.
 
+use std::cell::UnsafeCell;
+use std::mem;
 use std::ops::Deref;
 use std::sync::atomic::{AtomicUsize, Ordering};
-use std::sync::{Condvar, LockResult, Mutex, MutexGuard, PoisonError, TryLockError, TryLockResult};
+use std::sync::{LockResult, Mutex, MutexGuard, PoisonError, TryLockError, TryLockResult};
 
 #[derive(Copy, Clone, Eq, PartialEq, Ord, PartialOrd, Hash, Debug)]
 pub struct ThreadId(usize);
 
-lazy_static!{ static ref THREAD_COUNT: AtomicUsize = AtomicUsize::new(0); }
+lazy_static!{ static ref THREAD_COUNT: AtomicUsize = AtomicUsize::new(1); }
 
 impl ThreadId {
     fn new() -> ThreadId {
@@ -28,11 +30,52 @@ impl ThreadId {
     }
 }
 
-thread_local!{ static THREAD_ID: ThreadId = ThreadId::new(); }
+thread_local!{ static THREAD_ID: ThreadId = ThreadId::new() }
+
+struct HandOverHandMutex {
+    mutex: Mutex<()>,
+    guard: UnsafeCell<Option<MutexGuard<'static, ()>>>,
+}
+
+#[allow(unsafe_code)]
+impl HandOverHandMutex {
+    fn new() -> HandOverHandMutex {
+        HandOverHandMutex {
+            mutex: Mutex::new(()),
+            guard: UnsafeCell::new(None),
+        }
+    }
+    fn lock<'a>(&'a self) -> LockResult<()> {
+        match self.mutex.lock() {
+            Ok(guard) => {
+                unsafe { *self.guard.get().as_mut().unwrap() = mem::transmute(guard) };
+                Ok(())
+            },
+            Err(_) => Err(PoisonError::new(())),
+        }
+    }
+    fn try_lock<'a>(&'a self) -> TryLockResult<()> {
+        match self.mutex.try_lock() {
+            Ok(guard) => {
+                unsafe { *self.guard.get().as_mut().unwrap() = mem::transmute(guard) };
+                Ok(())
+            },
+            Err(TryLockError::WouldBlock) => Err(TryLockError::WouldBlock),
+            Err(TryLockError::Poisoned(_)) => Err(TryLockError::Poisoned(PoisonError::new(()))),
+        }
+    }
+    unsafe fn unlock<'a>(&'a self) {
+        *self.guard.get().as_mut().unwrap() = None;
+    }
+}
+
+#[allow(unsafe_code)]
+unsafe impl Send for HandOverHandMutex {}
 
 pub struct ReentrantMutex<T> {
-    mutex: Mutex<(ThreadId, usize)>,
-    condvar: Condvar,
+    mutex: HandOverHandMutex,
+    owner: AtomicUsize,
+    count: AtomicUsize,
     data: T,
 }
 
@@ -42,52 +85,48 @@ unsafe impl<T> Sync for ReentrantMutex<T> where T: Send {}
 impl<T> ReentrantMutex<T> {
     pub fn new(data: T) -> ReentrantMutex<T> {
         ReentrantMutex {
-            mutex: Mutex::new((ThreadId::current(), 0)),
-            condvar: Condvar::new(),
+            mutex: HandOverHandMutex::new(),
+            owner: AtomicUsize::new(0),
+            count: AtomicUsize::new(0),
             data: data,
         }
     }
 
-    fn unlock(&self) {
-        if let Ok(mut locked) = self.mutex.lock() {
-            locked.1 = locked.1 - 1;
-            if locked.1 == 0 { self.condvar.notify_one(); }
-        }
-    }
-
-    fn try_once(&self, attempt: &mut LockResult<MutexGuard<(ThreadId, usize)>>)
-                -> TryLockResult<ReentrantMutexGuard<T>>
-    {
+    pub fn lock(&self) -> LockResult<ReentrantMutexGuard<T>> {
+        let owner = ThreadId(self.owner.load(Ordering::Relaxed));
         let current = ThreadId::current();
-        let result = ReentrantMutexGuard { mutex: &self };
-        match attempt {
-            &mut Ok(ref mut locked) => if locked.0 == current {
-                locked.1 = locked.1 + 1;
-                Ok(result)
-            } else if locked.1 == 0 {
-                locked.0 = current;
-                locked.1 = 1;
-                Ok(result)
-            } else {
-                Err(TryLockError::WouldBlock)
-            },
-            &mut Err(_) => Err(TryLockError::Poisoned(PoisonError::new(result))),
+        let result = ReentrantMutexGuard { mutex: self };
+        if current != owner {
+            match self.mutex.lock() {
+                Ok(_) => self.owner.store(current.0, Ordering::Relaxed),
+                Err(_) => return Err(PoisonError::new(result)),
+            }
         }
+        self.count.fetch_add(1, Ordering::Relaxed);
+        Ok(result)
     }
 
     pub fn try_lock(&self) -> TryLockResult<ReentrantMutexGuard<T>> {
-        let mut locked = self.mutex.lock();
-        self.try_once(&mut locked)
+        let owner = ThreadId(self.owner.load(Ordering::Relaxed));
+        let current = ThreadId::current();
+        let result = ReentrantMutexGuard { mutex: self };
+        if current != owner {
+            match self.mutex.try_lock() {
+                Ok(_) => self.owner.store(current.0, Ordering::Relaxed),
+                Err(TryLockError::WouldBlock) => return Err(TryLockError::WouldBlock),
+                Err(TryLockError::Poisoned(_)) => return Err(TryLockError::Poisoned(PoisonError::new(result))),
+            }
+        }
+        self.count.fetch_add(1, Ordering::Relaxed);
+        Ok(result)
     }
 
-    pub fn lock(&self) -> LockResult<ReentrantMutexGuard<T>> {
-        let mut locked = self.mutex.lock();
-        loop {
-            match self.try_once(&mut locked) {
-                Ok(result) => { return Ok(result); },
-                Err(TryLockError::Poisoned(err)) => { return Err(err); },
-                Err(TryLockError::WouldBlock) => { locked = self.condvar.wait(locked.unwrap()); },
-            }
+    #[allow(unsafe_code)]
+    unsafe fn unlock(&self) {
+        let count = self.count.fetch_sub(1, Ordering::Relaxed);
+        if count <= 1 {
+            self.owner.store(0, Ordering::Relaxed);
+            self.mutex.unlock();
         }
     }
 }
@@ -98,8 +137,9 @@ pub struct ReentrantMutexGuard<'a, T> where T: 'static {
 }
 
 impl<'a, T> Drop for ReentrantMutexGuard<'a, T> {
+    #[allow(unsafe_code)]
     fn drop(&mut self) {
-        self.mutex.unlock()
+        unsafe { self.mutex.unlock() }
     }
 }
 
