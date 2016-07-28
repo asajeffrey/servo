@@ -55,7 +55,7 @@ use std::marker::PhantomData;
 use std::mem::replace;
 use std::process;
 use std::sync::mpsc::{Sender, channel, Receiver};
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 use std::thread;
 use std::time::Instant;
 use style_traits::PagePx;
@@ -361,7 +361,7 @@ impl FromCompositorLogger {
     /// Create a new constellation logger.
     pub fn new(constellation_chan: Sender<FromCompositorMsg>) -> FromCompositorLogger {
         FromCompositorLogger {
-            constellation_chan: Arc::new(Mutex::new(constellation_chan))
+            constellation_chan: Arc::new(ReentrantMutex::new(constellation_chan))
         }
     }
 
