@@ -18,6 +18,7 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{LockResult, Mutex, MutexGuard, PoisonError, TryLockError, TryLockResult};
 
 /// A type for thread ids.
+
 // TODO: can we use the thread-id crate for this?
 
 #[derive(Copy, Clone, Eq, PartialEq, Ord, PartialOrd, Hash, Debug)]
@@ -69,6 +70,8 @@ impl AtomicOptThreadId {
 /// mutex owner. `unlock` can only be called by the lock owner, and panics otherwise.
 /// They have the same happens-before and poisoning semantics as `Mutex`.
 
+// TODO: Can we use `raw_lock` and `raw_unlock` from `parking_lot`'s `Mutex` for this?
+
 pub struct HandOverHandMutex {
     mutex: Mutex<()>,
     owner: AtomicOptThreadId,
@@ -85,26 +88,24 @@ impl HandOverHandMutex {
     }
     #[allow(unsafe_code)]
     pub fn lock(&self) -> LockResult<()> {
-        match self.mutex.lock() {
-            Ok(guard) => {
-                unsafe { *self.guard.get().as_mut().unwrap() = mem::transmute(guard) };
-                self.owner.store(Some(ThreadId::current()), Ordering::Relaxed);
-                Ok(())
-            },
-            Err(_) => Err(PoisonError::new(())),
-        }
+        let (guard, result) = match self.mutex.lock() {
+            Ok(guard) => (guard, Ok(())),
+            Err(err) => (err.into_inner(), Err(PoisonError::new(()))),
+        };
+        unsafe { *self.guard.get().as_mut().unwrap() = mem::transmute(guard) };
+        self.owner.store(Some(ThreadId::current()), Ordering::Relaxed);
+        result
     }
     #[allow(unsafe_code)]
     pub fn try_lock(&self) -> TryLockResult<()> {
-        match self.mutex.try_lock() {
-            Ok(guard) => {
-                unsafe { *self.guard.get().as_mut().unwrap() = mem::transmute(guard) };
-                self.owner.store(Some(ThreadId::current()), Ordering::Relaxed);
-                Ok(())
-            },
-            Err(TryLockError::WouldBlock) => Err(TryLockError::WouldBlock),
-            Err(TryLockError::Poisoned(_)) => Err(TryLockError::Poisoned(PoisonError::new(()))),
-        }
+        let (guard, result) = match self.mutex.try_lock() {
+            Ok(guard) => (guard, Ok(())),
+            Err(TryLockError::WouldBlock) => return Err(TryLockError::WouldBlock),
+            Err(TryLockError::Poisoned(err)) => (err.into_inner(), Err(TryLockError::Poisoned(PoisonError::new(())))),
+        };
+        unsafe { *self.guard.get().as_mut().unwrap() = mem::transmute(guard) };
+        self.owner.store(Some(ThreadId::current()), Ordering::Relaxed);
+        result
     }
     #[allow(unsafe_code)]
     pub fn unlock(&self) {
@@ -135,6 +136,7 @@ unsafe impl<T> Sync for ReentrantMutex<T> where T: Send {}
 
 impl<T> ReentrantMutex<T> {
     pub fn new(data: T) -> ReentrantMutex<T> {
+        debug!("{:?} Creating new lock.", ThreadId::current());
         ReentrantMutex {
             mutex: HandOverHandMutex::new(),
             count: Cell::new(0),
@@ -143,36 +145,55 @@ impl<T> ReentrantMutex<T> {
     }
 
     pub fn lock(&self) -> LockResult<ReentrantMutexGuard<T>> {
-        let result = ReentrantMutexGuard { mutex: self };
+        debug!("{:?} Locking.", ThreadId::current());
         if self.mutex.owner() != Some(ThreadId::current()) {
+            debug!("{:?} Becoming owner.", ThreadId::current());
             if let Err(_) = self.mutex.lock() {
-                return Err(PoisonError::new(result));
+                debug!("{:?} Poison!", ThreadId::current());
+                return Err(PoisonError::new(self.mk_guard()));
             }
+            debug!("{:?} Became owner.", ThreadId::current());
         }
-        self.count.set(self.count.get().checked_add(1).expect("Overflowed lock count."));
-        Ok(result)
+        Ok(self.mk_guard())
     }
 
     pub fn try_lock(&self) -> TryLockResult<ReentrantMutexGuard<T>> {
-        let result = ReentrantMutexGuard { mutex: self };
+        debug!("{:?} Try locking.", ThreadId::current());
         if self.mutex.owner() != Some(ThreadId::current()) {
+            debug!("{:?} Becoming owner?", ThreadId::current());
             if let Err(err) = self.mutex.try_lock() {
                 match err {
-                    TryLockError::WouldBlock => return Err(TryLockError::WouldBlock),
-                    TryLockError::Poisoned(_) => return Err(TryLockError::Poisoned(PoisonError::new(result))),
+                    TryLockError::WouldBlock => {
+                        debug!("{:?} Would block.", ThreadId::current());
+                        return Err(TryLockError::WouldBlock)
+                    },
+                    TryLockError::Poisoned(_) => {
+                        debug!("{:?} Poison!", ThreadId::current());
+                        return Err(TryLockError::Poisoned(PoisonError::new(self.mk_guard())));
+                    },
                 }
             }
+            debug!("{:?} Became owner.", ThreadId::current());
         }
-        self.count.set(self.count.get().checked_add(1).expect("Overflowed lock count."));
-        Ok(result)
+        Ok(self.mk_guard())
     }
 
     fn unlock(&self) {
+        debug!("{:?} Unlocking.", ThreadId::current());
         let count = self.count.get().checked_sub(1).expect("Underflowed lock count.");
+        debug!("{:?} Decrementing count to {}.", ThreadId::current(), count);
         self.count.set(count);
         if count == 0 {
+            debug!("{:?} Releasing mutex.", ThreadId::current());
             self.mutex.unlock();
         }
+    }
+
+    fn mk_guard(&self) -> ReentrantMutexGuard<T> {
+        let count = self.count.get().checked_add(1).expect("Overflowed lock count.");
+        debug!("{:?} Incrementing count to {}.", ThreadId::current(), count);
+        self.count.set(count);
+        ReentrantMutexGuard { mutex: self }
     }
 }
 
