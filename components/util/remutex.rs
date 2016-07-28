@@ -32,40 +32,71 @@ impl ThreadId {
 
 thread_local!{ static THREAD_ID: ThreadId = ThreadId::new() }
 
-struct HandOverHandMutex {
+#[derive(Debug)]
+pub struct AtomicOptThreadId(AtomicUsize);
+
+impl AtomicOptThreadId {
+    pub fn new() -> AtomicOptThreadId {
+        AtomicOptThreadId(AtomicUsize::new(0))
+    }
+    pub fn store(&self, value: Option<ThreadId>, ordering: Ordering) {
+        let number = value.map(|id| id.0).unwrap_or(0);
+        self.0.store(number, ordering);
+    }
+    pub fn load(&self, ordering: Ordering) -> Option<ThreadId> {
+        let number = self.0.load(ordering);
+        if number == 0 { None } else { Some(ThreadId(number)) }
+    }
+    pub fn swap(&self, value: Option<ThreadId>, ordering: Ordering) -> Option<ThreadId> {
+        let number = value.map(|id| id.0).unwrap_or(0);
+        let number = self.0.swap(number, ordering);
+        if number == 0 { None } else { Some(ThreadId(number)) }
+    }
+}
+
+pub struct HandOverHandMutex {
     mutex: Mutex<()>,
+    owner: AtomicOptThreadId,
     guard: UnsafeCell<Option<MutexGuard<'static, ()>>>,
 }
 
 #[allow(unsafe_code)]
 impl HandOverHandMutex {
-    fn new() -> HandOverHandMutex {
+    pub fn new() -> HandOverHandMutex {
         HandOverHandMutex {
             mutex: Mutex::new(()),
+            owner: AtomicOptThreadId::new(),
             guard: UnsafeCell::new(None),
         }
     }
-    fn lock<'a>(&'a self) -> LockResult<()> {
+    pub fn lock(&self) -> LockResult<()> {
         match self.mutex.lock() {
             Ok(guard) => {
                 unsafe { *self.guard.get().as_mut().unwrap() = mem::transmute(guard) };
+                self.owner.store(Some(ThreadId::current()), Ordering::Relaxed);
                 Ok(())
             },
             Err(_) => Err(PoisonError::new(())),
         }
     }
-    fn try_lock<'a>(&'a self) -> TryLockResult<()> {
+    pub fn try_lock(&self) -> TryLockResult<()> {
         match self.mutex.try_lock() {
             Ok(guard) => {
                 unsafe { *self.guard.get().as_mut().unwrap() = mem::transmute(guard) };
+                self.owner.store(Some(ThreadId::current()), Ordering::Relaxed);
                 Ok(())
             },
             Err(TryLockError::WouldBlock) => Err(TryLockError::WouldBlock),
             Err(TryLockError::Poisoned(_)) => Err(TryLockError::Poisoned(PoisonError::new(()))),
         }
     }
-    unsafe fn unlock<'a>(&'a self) {
-        *self.guard.get().as_mut().unwrap() = None;
+    pub fn unlock(&self) {
+        assert_eq!(Some(ThreadId::current()), self.owner.load(Ordering::Relaxed));
+        self.owner.store(None, Ordering::Relaxed);
+        unsafe { *self.guard.get().as_mut().unwrap() = None; }
+    }
+    pub fn owner(&self) -> Option<ThreadId> {
+        self.owner.load(Ordering::Relaxed)
     }
 }
 
@@ -74,7 +105,6 @@ unsafe impl Send for HandOverHandMutex {}
 
 pub struct ReentrantMutex<T> {
     mutex: HandOverHandMutex,
-    owner: AtomicUsize,
     count: AtomicUsize,
     data: T,
 }
@@ -86,20 +116,16 @@ impl<T> ReentrantMutex<T> {
     pub fn new(data: T) -> ReentrantMutex<T> {
         ReentrantMutex {
             mutex: HandOverHandMutex::new(),
-            owner: AtomicUsize::new(0),
             count: AtomicUsize::new(0),
             data: data,
         }
     }
 
     pub fn lock(&self) -> LockResult<ReentrantMutexGuard<T>> {
-        let owner = ThreadId(self.owner.load(Ordering::Relaxed));
-        let current = ThreadId::current();
         let result = ReentrantMutexGuard { mutex: self };
-        if current != owner {
-            match self.mutex.lock() {
-                Ok(_) => self.owner.store(current.0, Ordering::Relaxed),
-                Err(_) => return Err(PoisonError::new(result)),
+        if self.mutex.owner() != Some(ThreadId::current()) {
+            if let Err(_) = self.mutex.lock() {
+                return Err(PoisonError::new(result));
             }
         }
         self.count.fetch_add(1, Ordering::Relaxed);
@@ -107,25 +133,22 @@ impl<T> ReentrantMutex<T> {
     }
 
     pub fn try_lock(&self) -> TryLockResult<ReentrantMutexGuard<T>> {
-        let owner = ThreadId(self.owner.load(Ordering::Relaxed));
-        let current = ThreadId::current();
         let result = ReentrantMutexGuard { mutex: self };
-        if current != owner {
-            match self.mutex.try_lock() {
-                Ok(_) => self.owner.store(current.0, Ordering::Relaxed),
-                Err(TryLockError::WouldBlock) => return Err(TryLockError::WouldBlock),
-                Err(TryLockError::Poisoned(_)) => return Err(TryLockError::Poisoned(PoisonError::new(result))),
+        if self.mutex.owner() != Some(ThreadId::current()) {
+            if let Err(err) = self.mutex.try_lock() {
+                match err {
+                    TryLockError::WouldBlock => return Err(TryLockError::WouldBlock),
+                    TryLockError::Poisoned(_) => return Err(TryLockError::Poisoned(PoisonError::new(result))),
+                }
             }
         }
         self.count.fetch_add(1, Ordering::Relaxed);
         Ok(result)
     }
 
-    #[allow(unsafe_code)]
-    unsafe fn unlock(&self) {
+    fn unlock(&self) {
         let count = self.count.fetch_sub(1, Ordering::Relaxed);
         if count <= 1 {
-            self.owner.store(0, Ordering::Relaxed);
             self.mutex.unlock();
         }
     }
@@ -139,7 +162,7 @@ pub struct ReentrantMutexGuard<'a, T> where T: 'static {
 impl<'a, T> Drop for ReentrantMutexGuard<'a, T> {
     #[allow(unsafe_code)]
     fn drop(&mut self) {
-        unsafe { self.mutex.unlock() }
+        self.mutex.unlock()
     }
 }
 
