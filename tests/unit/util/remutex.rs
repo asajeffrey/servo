@@ -61,7 +61,6 @@ impl<'a> Drop for Answer<'a> {
 fn poison_works() {
     let m = Arc::new(ReentrantMutex::new(RefCell::new(0)));
     let mc = m.clone();
-    panic!("x");
     let result = thread::spawn(move ||{
         let lock = mc.lock().unwrap();
         *lock.borrow_mut() = 1;

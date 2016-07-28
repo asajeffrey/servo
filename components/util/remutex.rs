@@ -11,11 +11,14 @@
 //! so if those types are ever exported, we should be able to replace this implemtation.
 
 use core::nonzero::NonZero;
-use std::cell::UnsafeCell;
+use std::cell::{Cell, UnsafeCell};
 use std::mem;
 use std::ops::Deref;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{LockResult, Mutex, MutexGuard, PoisonError, TryLockError, TryLockResult};
+
+/// A type for thread ids.
+// TODO: can we use the thread-id crate for this?
 
 #[derive(Copy, Clone, Eq, PartialEq, Ord, PartialOrd, Hash, Debug)]
 pub struct ThreadId(NonZero<usize>);
@@ -35,6 +38,7 @@ impl ThreadId {
 
 thread_local!{ static THREAD_ID: ThreadId = ThreadId::new() }
 
+/// A type for atomic storage of thread ids.
 #[derive(Debug)]
 pub struct AtomicOptThreadId(AtomicUsize);
 
@@ -58,6 +62,12 @@ impl AtomicOptThreadId {
         if number == 0 { None } else { Some(ThreadId(unsafe { NonZero::new(number) })) }
     }
 }
+
+/// A type for hand-over-hand mutexes.
+///
+/// These support `lock` and `unlock` functions. `lock` blocks waiting to become the
+/// mutex owner. `unlock` can only be called by the lock owner, and panics otherwise.
+/// They have the same happens-before and poisoning semantics as `Mutex`.
 
 pub struct HandOverHandMutex {
     mutex: Mutex<()>,
@@ -110,9 +120,13 @@ impl HandOverHandMutex {
 #[allow(unsafe_code)]
 unsafe impl Send for HandOverHandMutex {}
 
+/// A type for re-entrant mutexes.
+///
+/// It provides the same interface as https://github.com/rust-lang/rust/blob/master/src/libstd/sys/common/remutex.rs
+
 pub struct ReentrantMutex<T> {
     mutex: HandOverHandMutex,
-    count: AtomicUsize,
+    count: Cell<usize>,
     data: T,
 }
 
@@ -123,7 +137,7 @@ impl<T> ReentrantMutex<T> {
     pub fn new(data: T) -> ReentrantMutex<T> {
         ReentrantMutex {
             mutex: HandOverHandMutex::new(),
-            count: AtomicUsize::new(0),
+            count: Cell::new(0),
             data: data,
         }
     }
@@ -135,7 +149,7 @@ impl<T> ReentrantMutex<T> {
                 return Err(PoisonError::new(result));
             }
         }
-        self.count.fetch_add(1, Ordering::Relaxed);
+        self.count.set(self.count.get().checked_add(1).expect("Overflowed lock count."));
         Ok(result)
     }
 
@@ -149,13 +163,14 @@ impl<T> ReentrantMutex<T> {
                 }
             }
         }
-        self.count.fetch_add(1, Ordering::Relaxed);
+        self.count.set(self.count.get().checked_add(1).expect("Overflowed lock count."));
         Ok(result)
     }
 
     fn unlock(&self) {
-        let count = self.count.fetch_sub(1, Ordering::Relaxed);
-        if count <= 1 {
+        let count = self.count.get().checked_sub(1).expect("Underflowed lock count.");
+        self.count.set(count);
+        if count == 0 {
             self.mutex.unlock();
         }
     }
