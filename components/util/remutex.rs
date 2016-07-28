@@ -10,6 +10,7 @@
 //! It provides the same interface as https://github.com/rust-lang/rust/blob/master/src/libstd/sys/common/remutex.rs
 //! so if those types are ever exported, we should be able to replace this implemtation.
 
+use core::nonzero::NonZero;
 use std::cell::UnsafeCell;
 use std::mem;
 use std::ops::Deref;
@@ -17,13 +18,15 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{LockResult, Mutex, MutexGuard, PoisonError, TryLockError, TryLockResult};
 
 #[derive(Copy, Clone, Eq, PartialEq, Ord, PartialOrd, Hash, Debug)]
-pub struct ThreadId(usize);
+pub struct ThreadId(NonZero<usize>);
 
 lazy_static!{ static ref THREAD_COUNT: AtomicUsize = AtomicUsize::new(1); }
 
 impl ThreadId {
+    #[allow(unsafe_code)]
     fn new() -> ThreadId {
-        ThreadId(THREAD_COUNT.fetch_add(1, Ordering::SeqCst))
+        let number = THREAD_COUNT.fetch_add(1, Ordering::SeqCst);
+        ThreadId(unsafe { NonZero::new(number) })
     }
     pub fn current() -> ThreadId {
         THREAD_ID.with(|tls| tls.clone())
@@ -40,17 +43,19 @@ impl AtomicOptThreadId {
         AtomicOptThreadId(AtomicUsize::new(0))
     }
     pub fn store(&self, value: Option<ThreadId>, ordering: Ordering) {
-        let number = value.map(|id| id.0).unwrap_or(0);
+        let number = value.map(|id| *id.0).unwrap_or(0);
         self.0.store(number, ordering);
     }
+    #[allow(unsafe_code)]
     pub fn load(&self, ordering: Ordering) -> Option<ThreadId> {
         let number = self.0.load(ordering);
-        if number == 0 { None } else { Some(ThreadId(number)) }
+        if number == 0 { None } else { Some(ThreadId(unsafe { NonZero::new(number) })) }
     }
+    #[allow(unsafe_code)]
     pub fn swap(&self, value: Option<ThreadId>, ordering: Ordering) -> Option<ThreadId> {
-        let number = value.map(|id| id.0).unwrap_or(0);
+        let number = value.map(|id| *id.0).unwrap_or(0);
         let number = self.0.swap(number, ordering);
-        if number == 0 { None } else { Some(ThreadId(number)) }
+        if number == 0 { None } else { Some(ThreadId(unsafe { NonZero::new(number) })) }
     }
 }
 
@@ -60,7 +65,6 @@ pub struct HandOverHandMutex {
     guard: UnsafeCell<Option<MutexGuard<'static, ()>>>,
 }
 
-#[allow(unsafe_code)]
 impl HandOverHandMutex {
     pub fn new() -> HandOverHandMutex {
         HandOverHandMutex {
@@ -69,6 +73,7 @@ impl HandOverHandMutex {
             guard: UnsafeCell::new(None),
         }
     }
+    #[allow(unsafe_code)]
     pub fn lock(&self) -> LockResult<()> {
         match self.mutex.lock() {
             Ok(guard) => {
@@ -79,6 +84,7 @@ impl HandOverHandMutex {
             Err(_) => Err(PoisonError::new(())),
         }
     }
+    #[allow(unsafe_code)]
     pub fn try_lock(&self) -> TryLockResult<()> {
         match self.mutex.try_lock() {
             Ok(guard) => {
@@ -90,6 +96,7 @@ impl HandOverHandMutex {
             Err(TryLockError::Poisoned(_)) => Err(TryLockError::Poisoned(PoisonError::new(()))),
         }
     }
+    #[allow(unsafe_code)]
     pub fn unlock(&self) {
         assert_eq!(Some(ThreadId::current()), self.owner.load(Ordering::Relaxed));
         self.owner.store(None, Ordering::Relaxed);
