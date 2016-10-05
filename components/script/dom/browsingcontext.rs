@@ -11,7 +11,7 @@ use dom::bindings::trace::JSTraceable;
 use dom::bindings::utils::WindowProxyHandler;
 use dom::bindings::utils::get_array_index_from_id;
 use dom::document::Document;
-use dom::element::Element;
+use dom::htmliframeelement::HTMLIFrameElement;
 use dom::window::Window;
 use js::JSCLASS_IS_GLOBAL;
 use js::glue::{CreateWrapperProxyHandler, ProxyTraps, NewWindowProxy};
@@ -20,7 +20,7 @@ use js::jsapi::{Handle, HandleId, HandleObject, HandleValue};
 use js::jsapi::{JSAutoCompartment, JSContext, JSErrNum, JSFreeOp, JSObject};
 use js::jsapi::{JSPROP_READONLY, JSTracer, JS_DefinePropertyById};
 use js::jsapi::{JS_ForwardGetPropertyTo, JS_ForwardSetPropertyTo, JS_GetClass};
-use js::jsapi::{JS_GetOwnPropertyDescriptorById, JS_HasPropertyById};
+use js::jsapi::{JS_GetOwnPropertyDescriptorById, JS_HasPropertyById, JS_TransplantObject};
 use js::jsapi::{MutableHandle, MutableHandleObject, MutableHandleValue};
 use js::jsapi::{ObjectOpResult, PropertyDescriptor};
 use js::jsval::{UndefinedValue, PrivateValue};
@@ -50,11 +50,11 @@ pub struct BrowsingContext {
     active_document: MutNullableHeap<JS<Document>>,
 
     /// The containing iframe element, if this is a same-origin iframe
-    frame_element: Option<JS<Element>>,
+    frame_element: Option<JS<HTMLIFrameElement>>,
 }
 
 impl BrowsingContext {
-    pub fn new_inherited(frame_element: Option<&Element>, id: PipelineId) -> BrowsingContext {
+    pub fn new_inherited(frame_element: Option<&HTMLIFrameElement>, id: PipelineId) -> BrowsingContext {
         BrowsingContext {
             reflector: Reflector::new(),
             id: id,
@@ -66,7 +66,7 @@ impl BrowsingContext {
     }
 
     #[allow(unsafe_code)]
-    pub fn new(window: &Window, frame_element: Option<&Element>, id: PipelineId) -> Root<BrowsingContext> {
+    pub fn new(window: &Window, frame_element: Option<&HTMLIFrameElement>, id: PipelineId) -> Root<BrowsingContext> {
         unsafe {
             let WindowProxyHandler(handler) = window.windowproxy_handler();
             assert!(!handler.is_null());
@@ -90,7 +90,21 @@ impl BrowsingContext {
         }
     }
 
+    #[allow(unsafe_code)]
     pub fn set_active_document(&self, document: &Document) {
+        // If there is a document in the iframe, we transplant its
+        // browsing context.
+        let old_browsing_context = self.frame_element()
+            .and_then(|frame_element| frame_element.get_content_window())
+            .and_then(|window| window.maybe_browsing_context());
+
+        if let Some(old_browsing_context) = old_browsing_context {
+            let cx = document.window().get_cx();
+            let old_js_object = old_browsing_context.reflector.get_jsobject();
+            let new_js_object = self.reflector.get_jsobject();
+            unsafe { JS_TransplantObject(cx, old_js_object, new_js_object); }
+        }
+
         self.active_document.set(Some(document))
     }
 
@@ -106,7 +120,11 @@ impl BrowsingContext {
         Root::from_ref(self.active_document().window())
     }
 
-    pub fn frame_element(&self) -> Option<&Element> {
+    pub fn maybe_active_window(&self) -> Option<Root<Window>> {
+        self.maybe_active_document().map(|doc| Root::from_ref(doc.window()))
+    }
+
+    pub fn frame_element(&self) -> Option<&HTMLIFrameElement> {
         self.frame_element.r()
     }
 
@@ -149,9 +167,8 @@ impl BrowsingContext {
 
     pub fn find_child_by_id(&self, pipeline_id: PipelineId) -> Option<Root<Window>> {
         self.children.borrow().iter().find(|context| {
-            let window = context.active_window();
-            window.pipeline_id() == pipeline_id
-        }).map(|context| context.active_window())
+            context.id == pipeline_id
+        }).and_then(|context| context.maybe_active_window())
     }
 
     pub fn unset_active_document(&self) {

@@ -348,6 +348,10 @@ impl Window {
         self.browsing_context.get().unwrap()
     }
 
+    pub fn maybe_browsing_context(&self) -> Option<Root<BrowsingContext>> {
+        self.browsing_context.get()
+    }
+
     pub fn bluetooth_thread(&self) -> IpcSender<BluetoothMethodMsg> {
         self.bluetooth_thread.clone()
     }
@@ -509,7 +513,7 @@ impl WindowMethods for Window {
 
     // https://html.spec.whatwg.org/multipage/#dom-frameelement
     fn GetFrameElement(&self) -> Option<Root<Element>> {
-        self.browsing_context().frame_element().map(Root::from_ref)
+        self.browsing_context().frame_element().map(Castable::upcast).map(Root::from_ref)
     }
 
     // https://html.spec.whatwg.org/multipage/#dom-navigator

@@ -1,0 +1,32 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>Change the frame heriarchy</title>
+<script src="/resources/testharness.js"></script>
+<script src="/resources/testharnessreport.js"></script>
+<script>
+  var test = null;
+  var child_window = null;
+  function first_child(win) {
+    var frame = document.getElementById("frame");
+    child_window = win;
+    test.step(function() {
+      assert_equals(win, child_window);
+      assert_equals(win, frame.contentWindow);
+    })
+    frame.src = "navigate_iframe_child_02.html";
+  }
+  function second_child(win) {
+    var frame = document.getElementById("frame");
+    test.step(function() {
+      assert_equals(win, child_window);
+      assert_equals(win, frame.contentWindow);
+    })
+    test.done();
+  }
+  async_test(function(t) {
+    test = t;
+  });
+</script>
+<body>
+  <iframe id="frame" src="navigate_iframe_child_01.html"></iframe>
+</body>

@@ -1613,7 +1613,7 @@ impl ScriptThread {
                                  incomplete.pipeline_id,
                                  incomplete.parent_info,
                                  incomplete.window_size);
-        let frame_element = frame_element.r().map(Castable::upcast);
+        let frame_element = frame_element.r();
 
         enum ContextToRemove {
             Root,
