@@ -224,14 +224,16 @@ struct FrameState {
     instant: Instant,
     pipeline_id: PipelineId,
     frame_id: FrameId,
+    url: ServoUrl,
 }
 
 impl FrameState {
-    fn new(pipeline_id: PipelineId, frame_id: FrameId) -> FrameState {
+    fn new(pipeline_id: PipelineId, frame_id: FrameId, url: ServoUrl) -> FrameState {
         FrameState {
             instant: Instant::now(),
             pipeline_id: pipeline_id,
             frame_id: frame_id,
+            url: url,
         }
     }
 }
@@ -245,26 +247,26 @@ struct Frame {
 }
 
 impl Frame {
-    fn new(id: FrameId, pipeline_id: PipelineId) -> Frame {
+    fn new(id: FrameId, pipeline_id: PipelineId, url: ServoUrl) -> Frame {
         Frame {
             id: id,
             prev: vec!(),
-            current: FrameState::new(pipeline_id, id),
+            current: FrameState::new(pipeline_id, id, url),
             next: vec!(),
         }
     }
 
-    fn load(&mut self, pipeline_id: PipelineId) {
+    fn load(&mut self, pipeline_id: PipelineId, url: ServoUrl) {
         self.prev.push(self.current.clone());
-        self.current = FrameState::new(pipeline_id, self.id);
+        self.current = FrameState::new(pipeline_id, self.id, url);
     }
 
     fn remove_forward_entries(&mut self) -> Vec<FrameState> {
         replace(&mut self.next, vec!())
     }
 
-    fn replace_current(&mut self, pipeline_id: PipelineId) -> FrameState {
-        replace(&mut self.current, FrameState::new(pipeline_id, self.id))
+    fn replace_current(&mut self, pipeline_id: PipelineId, url: ServoUrl) -> FrameState {
+        replace(&mut self.current, FrameState::new(pipeline_id, self.id, url))
     }
 }
 
@@ -274,6 +276,7 @@ struct FrameChange {
     frame_id: FrameId,
     old_pipeline_id: Option<PipelineId>,
     new_pipeline_id: PipelineId,
+    url: ServoUrl,
     document_ready: bool,
     replace: bool,
 }
@@ -662,10 +665,12 @@ impl<Message, LTF, STF> Constellation<Message, LTF, STF>
         }
     }
 
-    fn joint_session_future(&self, frame_id_root: FrameId) -> Vec<(Instant, FrameId, PipelineId)> {
+    fn joint_session_future(&self, frame_id_root: FrameId) -> Vec<(Instant, FrameId, PipelineId, ServoUrl)> {
         let mut future = vec!();
         for frame in self.full_frame_tree_iter(frame_id_root) {
-            future.extend(frame.next.iter().map(|entry| (entry.instant, entry.frame_id, entry.pipeline_id)));
+            for entry in frame.next.iter() {
+                future.push((entry.instant, entry.frame_id, entry.pipeline_id, entry.url.clone()));
+            }
         }
 
         // reverse sorting
@@ -678,12 +683,12 @@ impl<Message, LTF, STF> Constellation<Message, LTF, STF>
             .all(|frame| frame.next.is_empty())
     }
 
-    fn joint_session_past(&self, frame_id_root: FrameId) -> Vec<(Instant, FrameId, PipelineId)> {
+    fn joint_session_past(&self, frame_id_root: FrameId) -> Vec<(Instant, FrameId, PipelineId, ServoUrl)> {
         let mut past = vec!();
         for frame in self.full_frame_tree_iter(frame_id_root) {
             let mut prev_instant = frame.current.instant;
             for entry in frame.prev.iter().rev() {
-                past.push((prev_instant, entry.frame_id, entry.pipeline_id));
+                past.push((prev_instant, entry.frame_id, entry.pipeline_id, entry.url.clone()));
                 prev_instant = entry.instant;
             }
         }
@@ -698,8 +703,8 @@ impl<Message, LTF, STF> Constellation<Message, LTF, STF>
     }
 
     // Create a new frame and update the internal bookkeeping.
-    fn new_frame(&mut self, frame_id: FrameId, pipeline_id: PipelineId) {
-        let frame = Frame::new(frame_id, pipeline_id);
+    fn new_frame(&mut self, frame_id: FrameId, pipeline_id: PipelineId, url: ServoUrl) {
+        let frame = Frame::new(frame_id, pipeline_id, url);
         self.frames.insert(frame_id, frame);
 
         // If a child frame, add it to the parent pipeline.
@@ -1216,7 +1221,7 @@ impl<Message, LTF, STF> Constellation<Message, LTF, STF>
 
             if let Some(frame_id) = frame_id {
                 let new_pipeline_id = PipelineId::new();
-                let load_data = LoadData::new(failure_url, None, None);
+                let load_data = LoadData::new(failure_url.clone(), None, None);
                 self.new_pipeline(new_pipeline_id, frame_id, parent_info, Some(pipeline_id),
                                   window_size, None, load_data, false);
 
@@ -1224,6 +1229,7 @@ impl<Message, LTF, STF> Constellation<Message, LTF, STF>
                     frame_id: frame_id,
                     old_pipeline_id: Some(pipeline_id),
                     new_pipeline_id: new_pipeline_id,
+                    url: failure_url,
                     document_ready: false,
                     replace: false,
                 });
@@ -1256,6 +1262,7 @@ impl<Message, LTF, STF> Constellation<Message, LTF, STF>
             frame_id: self.root_frame_id,
             old_pipeline_id: None,
             new_pipeline_id: root_pipeline_id,
+            url: url.clone(),
             document_ready: false,
             replace: false,
         });
@@ -1371,6 +1378,7 @@ impl<Message, LTF, STF> Constellation<Message, LTF, STF>
             (load_data, script_chan, window_size, is_private)
         };
 
+        let url = load_data.url.clone();
 
         // Create the new pipeline, attached to the parent and push to pending frames
         self.new_pipeline(load_info.new_pipeline_id,
@@ -1386,6 +1394,7 @@ impl<Message, LTF, STF> Constellation<Message, LTF, STF>
             frame_id: load_info.frame_id,
             old_pipeline_id: load_info.old_pipeline_id,
             new_pipeline_id: load_info.new_pipeline_id,
+            url: url,
             document_ready: false,
             replace: load_info.replace,
         });
@@ -1526,11 +1535,14 @@ impl<Message, LTF, STF> Constellation<Message, LTF, STF>
                 let window_size = self.pipelines.get(&source_id).and_then(|source| source.size);
                 let new_pipeline_id = PipelineId::new();
                 let root_frame_id = self.root_frame_id;
+                let url = load_data.url.clone();
+
                 self.new_pipeline(new_pipeline_id, root_frame_id, None, None, window_size, None, load_data, false);
                 self.pending_frames.push(FrameChange {
                     frame_id: root_frame_id,
                     old_pipeline_id: Some(source_id),
                     new_pipeline_id: new_pipeline_id,
+                    url: url,
                     document_ready: false,
                     replace: replace,
                 });
@@ -1584,27 +1596,24 @@ impl<Message, LTF, STF> Constellation<Message, LTF, STF>
                 let mut future = self.joint_session_future(frame_id);
                 for _ in 0..delta {
                     match future.pop() {
-                        Some((_, frame_id, pipeline_id)) => {
-                            traversal_info.insert(frame_id, pipeline_id);
-                        },
+                        Some((_, frame_id, pipeline_id, url)) => traversal_info.insert(frame_id, (pipeline_id, url)),
                         None => return warn!("invalid traversal delta"),
-                    }
+                    };
                 }
             },
             TraversalDirection::Back(delta) => {
                 let mut past = self.joint_session_past(frame_id);
                 for _ in 0..delta {
                     match past.pop() {
-                        Some((_, frame_id, pipeline_id)) => {
-                            traversal_info.insert(frame_id, pipeline_id);
-                        },
+                        Some((_, frame_id, pipeline_id, url)) => traversal_info.insert(frame_id, (pipeline_id, url)),
                         None => return warn!("invalid traversal delta"),
-                    }
+                    };
                 }
             },
         };
-        for (frame_id, pipeline_id) in traversal_info {
-            self.traverse_frame_to_pipeline(frame_id, pipeline_id);
+
+        for (frame_id, (pipeline_id, url)) in traversal_info {
+            self.traverse_frame_to_pipeline(frame_id, pipeline_id, url);
         }
     }
 
@@ -1884,7 +1893,38 @@ impl<Message, LTF, STF> Constellation<Message, LTF, STF>
         }
     }
 
-    fn traverse_frame_to_pipeline(&mut self, frame_id: FrameId, next_pipeline_id: PipelineId) {
+    fn traverse_frame_to_pipeline(&mut self, frame_id: FrameId, next_pipeline_id: PipelineId, url: ServoUrl) {
+        // If we are traversing to a discarded pipeline, reload the document
+        let new_pipeline_id = if self.pipelines.contains_key(&next_pipeline_id) {
+            next_pipeline_id
+        } else {
+            let new_pipeline_id = PipelineId::new();
+            let (parent_info, window_size, private) = match self.frames.get(&frame_id) {
+                None => (None, None, false),
+                Some(frame) => match self.pipelines.get(&frame.current.pipeline_id) {
+                    None => (None, None, false),
+                    Some(pipeline) => (pipeline.parent_info, pipeline.size, pipeline.is_private),
+                },
+            };
+
+            warn!("Creating replacement pipeline {} for closed pipeline {}.", new_pipeline_id, next_pipeline_id);
+
+            // TODO: referrer info?
+            let load_data = LoadData::new(url.clone(), None, None);
+            self.new_pipeline(new_pipeline_id, frame_id, parent_info, None, window_size, None, load_data, private);
+
+            self.pending_frames.push(FrameChange {
+                frame_id: frame_id,
+                old_pipeline_id: None,
+                new_pipeline_id: new_pipeline_id,
+                url: url,
+                document_ready: false,
+                replace: true,
+            });
+
+            new_pipeline_id
+        };
+
         // Check if the currently focused pipeline is the pipeline being replaced
         // (or a child of it). This has to be done here, before the current
         // frame tree is modified below.
@@ -1898,8 +1938,9 @@ impl<Message, LTF, STF> Constellation<Message, LTF, STF>
                 // change Frame's state before realizing `next_pipeline_id` is invalid.
                 if frame.next.iter().find(|entry| next_pipeline_id == entry.pipeline_id).is_some() {
                     frame.prev.push(frame.current.clone());
-                    while let Some(entry) = frame.next.pop() {
+                    while let Some(mut entry) = frame.next.pop() {
                         if entry.pipeline_id == next_pipeline_id {
+                            entry.pipeline_id = new_pipeline_id;
                             frame.current = entry;
                             break;
                         } else {
@@ -1908,8 +1949,9 @@ impl<Message, LTF, STF> Constellation<Message, LTF, STF>
                     }
                 } else if frame.prev.iter().find(|entry| next_pipeline_id == entry.pipeline_id).is_some() {
                     frame.next.push(frame.current.clone());
-                    while let Some(entry) = frame.prev.pop() {
+                    while let Some(mut entry) = frame.prev.pop() {
                         if entry.pipeline_id == next_pipeline_id {
+                            entry.pipeline_id = new_pipeline_id;
                             frame.current = entry;
                             break;
                         } else {
@@ -1932,7 +1974,7 @@ impl<Message, LTF, STF> Constellation<Message, LTF, STF>
         // of the pipeline being changed) then update the focus pipeline to be
         // the replacement.
         if update_focus_pipeline {
-            self.focus_pipeline_id = Some(next_pipeline_id);
+            self.focus_pipeline_id = Some(new_pipeline_id);
         }
 
         // Suspend the old pipeline, and resume the new one.
@@ -1951,7 +1993,7 @@ impl<Message, LTF, STF> Constellation<Message, LTF, STF>
         if let Some((parent_pipeline_id, _)) = pipeline_info {
             let msg = ConstellationControlMsg::UpdatePipelineId(parent_pipeline_id,
                                                                 frame_id,
-                                                                next_pipeline_id);
+                                                                new_pipeline_id);
             let result = match self.pipelines.get(&parent_pipeline_id) {
                 None => return warn!("Pipeline {:?} child traversed after closure.", parent_pipeline_id),
                 Some(pipeline) => pipeline.script_chan.send(msg),
@@ -1962,7 +2004,7 @@ impl<Message, LTF, STF> Constellation<Message, LTF, STF>
 
             // If this is an iframe, send a mozbrowser location change event.
             // This is the result of a back/forward traversal.
-            self.trigger_mozbrowserlocationchange(next_pipeline_id);
+            self.trigger_mozbrowserlocationchange(new_pipeline_id);
         }
     }
 
@@ -1991,41 +2033,50 @@ impl<Message, LTF, STF> Constellation<Message, LTF, STF>
     fn add_or_replace_pipeline_in_frame_tree(&mut self, frame_change: FrameChange) {
         debug!("Setting frame {} to be pipeline {}.", frame_change.frame_id, frame_change.new_pipeline_id);
 
+        let FrameChange {
+            frame_id,
+            old_pipeline_id,
+            new_pipeline_id,
+            url,
+            replace,
+            ..
+        } = frame_change;
+
         // If the currently focused pipeline is the one being changed (or a child
         // of the pipeline being changed) then update the focus pipeline to be
         // the replacement.
-        if let Some(old_pipeline_id) = frame_change.old_pipeline_id {
+        if let Some(old_pipeline_id) = old_pipeline_id {
             if let Some(old_frame_id) = self.pipelines.get(&old_pipeline_id).map(|pipeline| pipeline.frame_id) {
                 if self.focused_pipeline_in_tree(old_frame_id) {
-                    self.focus_pipeline_id = Some(frame_change.new_pipeline_id);
+                    self.focus_pipeline_id = Some(new_pipeline_id);
                 }
             }
         }
 
-        if self.frames.contains_key(&frame_change.frame_id) {
+        if self.frames.contains_key(&frame_id) {
             if frame_change.replace {
-                let evicted = self.frames.get_mut(&frame_change.frame_id).map(|frame| {
-                    frame.replace_current(frame_change.new_pipeline_id)
+                let evicted = self.frames.get_mut(&frame_id).map(|frame| {
+                    frame.replace_current(new_pipeline_id, url)
                 });
                 if let Some(evicted) = evicted {
                     self.close_pipeline(evicted.pipeline_id, ExitPipelineMode::Normal);
                 }
             } else {
-                if let Some(ref mut frame) = self.frames.get_mut(&frame_change.frame_id) {
-                    frame.load(frame_change.new_pipeline_id);
+                if let Some(ref mut frame) = self.frames.get_mut(&frame_id) {
+                    frame.load(new_pipeline_id, url);
                 }
             }
         } else {
             // The new pipeline is in a new frame with no history
-            self.new_frame(frame_change.frame_id, frame_change.new_pipeline_id);
+            self.new_frame(frame_id, new_pipeline_id, url);
         }
 
-        if !frame_change.replace {
+        if !replace {
             // If this is an iframe, send a mozbrowser location change event.
             // This is the result of a link being clicked and a navigation completing.
-            self.trigger_mozbrowserlocationchange(frame_change.new_pipeline_id);
+            self.trigger_mozbrowserlocationchange(new_pipeline_id);
 
-            let top_level_frame_id = self.get_top_level_frame_for_pipeline(Some(frame_change.new_pipeline_id));
+            let top_level_frame_id = self.get_top_level_frame_for_pipeline(Some(new_pipeline_id));
             self.clear_joint_session_future(top_level_frame_id);
         }
 

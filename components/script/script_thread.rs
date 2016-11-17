@@ -327,33 +327,65 @@ impl OpaqueSender<CommonScriptMsg> for Sender<MainThreadScriptMsg> {
 }
 
 /// The set of all documents managed by this script thread.
-#[derive(JSTraceable)]
 #[must_root]
 pub struct Documents {
-    map: HashMap<PipelineId, JS<Document>>,
+    // We weakly keep alive all documents, including inactive ones
+    // WeakRef only works for native objects, not proxy objects like Document,
+    // so we keep the weak map as raw pointers. This relies on Drop for Document
+    // calling discard_document.
+    weak_map: HashMap<PipelineId, *const Document>,
+    // We strongly keep alive all active documents
+    strong_map: HashMap<PipelineId, JS<Document>>,
+}
+
+impl JSTraceable for Documents {
+    fn trace(&self, trc: *mut JSTracer) {
+        // Note: we do not trace the weak map
+        self.strong_map.trace(trc);
+    }
 }
 
 impl Documents {
     pub fn new() -> Documents {
         Documents {
-            map: HashMap::new(),
+            weak_map: HashMap::new(),
+            strong_map: HashMap::new(),
         }
     }
 
     pub fn insert(&mut self, pipeline_id: PipelineId, doc: &Document) {
-        self.map.insert(pipeline_id, JS::from_ref(doc));
+        self.weak_map.insert(pipeline_id, doc);
+        self.strong_map.insert(pipeline_id, JS::from_ref(doc));
     }
 
     pub fn remove(&mut self, pipeline_id: PipelineId) -> Option<Root<Document>> {
-        self.map.remove(&pipeline_id).map(|ref doc| Root::from_ref(&**doc))
+        self.strong_map.remove(&pipeline_id);
+        self.weak_map.remove(&pipeline_id).map(|doc| Root::from_ref(unsafe { &*doc }))
+    }
+
+    pub fn upgrade(&mut self, pipeline_id: PipelineId) -> Option<Root<Document>> {
+        match self.strong_map.entry(pipeline_id) {
+            hash_map::Entry::Occupied(_) => None,
+            hash_map::Entry::Vacant(entry) => match self.weak_map.get(&pipeline_id) {
+                Some(document) => {
+                    entry.insert(JS::from_ref(unsafe { &**document }));
+                    Some(Root::from_ref(unsafe { &**document }))
+                },
+                None => None,
+            }
+        }
+    }
+
+    pub fn downgrade(&mut self, pipeline_id: PipelineId) -> Option<Root<Document>> {
+        self.strong_map.remove(&pipeline_id).map(|ref doc| Root::from_ref(&**doc))
     }
 
     pub fn is_empty(&self) -> bool {
-        self.map.is_empty()
+        self.weak_map.is_empty()
     }
 
     pub fn find_document(&self, pipeline_id: PipelineId) -> Option<Root<Document>> {
-        self.map.get(&pipeline_id).map(|doc| Root::from_ref(&**doc))
+        self.weak_map.get(&pipeline_id).map(|doc| Root::from_ref(unsafe { &**doc }))
     }
 
     pub fn find_window(&self, pipeline_id: PipelineId) -> Option<Root<Window>> {
@@ -370,21 +402,21 @@ impl Documents {
 
     pub fn iter<'a>(&'a self) -> DocumentsIter<'a> {
         DocumentsIter {
-            iter: self.map.iter(),
+            iter: self.weak_map.iter(),
         }
     }
 }
 
 #[allow(unrooted_must_root)]
 pub struct DocumentsIter<'a> {
-    iter: hash_map::Iter<'a, PipelineId, JS<Document>>,
+    iter: hash_map::Iter<'a, PipelineId, *const Document>,
 }
 
 impl<'a> Iterator for DocumentsIter<'a> {
     type Item = (PipelineId, Root<Document>);
 
     fn next(&mut self) -> Option<(PipelineId, Root<Document>)> {
-        self.iter.next().map(|(id, doc)| (*id, Root::from_ref(&**doc)))
+        self.iter.next().map(|(&id, doc)| (id, Root::from_ref(unsafe { &**doc })))
     }
 }
 
@@ -605,6 +637,22 @@ impl ScriptThread {
             let script_thread = unsafe { &*script_thread };
             script_thread.documents.borrow().find_document(id)
         }))
+    }
+
+    pub fn discard_document(document: &Document) {
+        SCRIPT_THREAD_ROOT.with(|root| {
+            if let Some(script_thread) = root.get() {
+                let script_thread = unsafe { &*script_thread };
+                if document.browsing_context().is_some() {
+                    let pipeline_id = document.global().pipeline_id();
+                    debug!("Document {} discarded.", pipeline_id);
+                    script_thread.closed_pipelines.borrow_mut().insert(pipeline_id);
+                    script_thread.documents.borrow_mut().remove(pipeline_id);
+                    shut_down_layout(document.window());
+                    let _ = script_thread.constellation_chan.send(ConstellationMsg::PipelineExited(pipeline_id));
+                }
+            }
+        })
     }
 
     /// Creates a new script thread.
@@ -1321,8 +1369,8 @@ impl ScriptThread {
 
     /// Handles freeze message
     fn handle_freeze_msg(&self, id: PipelineId) {
-        if let Some(window) = self.documents.borrow().find_window(id) {
-            window.upcast::<GlobalScope>().suspend();
+        if let Some(document) = self.documents.borrow_mut().downgrade(id) {
+            document.global().suspend();
             return;
         }
         let mut loads = self.incomplete_loads.borrow_mut();
@@ -1335,7 +1383,7 @@ impl ScriptThread {
 
     /// Handles thaw message
     fn handle_thaw_msg(&self, id: PipelineId) {
-        if let Some(document) = self.documents.borrow().find_document(id) {
+        if let Some(document) = self.documents.borrow_mut().upgrade(id) {
             if let Some(context) = document.browsing_context() {
                 let needed_reflow = context.set_reflow_status(false);
                 if needed_reflow {
