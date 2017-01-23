@@ -331,11 +331,30 @@ impl OpaqueSender<CommonScriptMsg> for Sender<MainThreadScriptMsg> {
     }
 }
 
+/// A possibly cross-origin document.
+#[derive(JSTraceable)]
+#[must_root]
+enum MaybeCrossOriginDocument {
+    /// A document in this script thread.
+    SimilarOrigin(JS<Document>),
+    /// A document in another script thread.
+    CrossOrigin(FrameId),
+}
+
+impl MaybeCrossOriginDocument {
+    fn similar_origin(&self) -> Option<Root<Document>> {
+        match *self {
+            MaybeCrossOriginDocument::SimilarOrigin(ref doc) => Some(Root::from_ref(&**doc)),
+            MaybeCrossOriginDocument::CrossOrigin(_) => None,
+        }
+    }
+}
+
 /// The set of all documents managed by this script thread.
 #[derive(JSTraceable)]
 #[must_root]
 pub struct Documents {
-    map: HashMap<PipelineId, JS<Document>>,
+    map: HashMap<PipelineId, MaybeCrossOriginDocument>,
 }
 
 impl Documents {
@@ -346,11 +365,11 @@ impl Documents {
     }
 
     pub fn insert(&mut self, pipeline_id: PipelineId, doc: &Document) {
-        self.map.insert(pipeline_id, JS::from_ref(doc));
+        self.map.insert(pipeline_id, MaybeCrossOriginDocument::SimilarOrigin(JS::from_ref(doc)));
     }
 
     pub fn remove(&mut self, pipeline_id: PipelineId) -> Option<Root<Document>> {
-        self.map.remove(&pipeline_id).map(|ref doc| Root::from_ref(&**doc))
+        self.map.remove(&pipeline_id).and_then(|ref doc| doc.similar_origin())
     }
 
     pub fn is_empty(&self) -> bool {
@@ -358,7 +377,7 @@ impl Documents {
     }
 
     pub fn find_document(&self, pipeline_id: PipelineId) -> Option<Root<Document>> {
-        self.map.get(&pipeline_id).map(|doc| Root::from_ref(&**doc))
+        self.map.get(&pipeline_id).and_then(|doc| doc.similar_origin())
     }
 
     pub fn find_window(&self, pipeline_id: PipelineId) -> Option<Root<Window>> {
@@ -382,17 +401,21 @@ impl Documents {
 
 #[allow(unrooted_must_root)]
 pub struct DocumentsIter<'a> {
-    iter: hash_map::Iter<'a, PipelineId, JS<Document>>,
+    iter: hash_map::Iter<'a, PipelineId, MaybeCrossOriginDocument>,
 }
 
 impl<'a> Iterator for DocumentsIter<'a> {
     type Item = (PipelineId, Root<Document>);
 
     fn next(&mut self) -> Option<(PipelineId, Root<Document>)> {
-        self.iter.next().map(|(id, doc)| (*id, Root::from_ref(&**doc)))
+        while let Some((id, doc)) = self.iter.next() {
+            if let MaybeCrossOriginDocument::SimilarOrigin(ref doc) = *doc {
+                return Some((*id, Root::from_ref(&**doc)));
+            }
+        }
+        None
     }
 }
-
 
 #[derive(JSTraceable)]
 // ScriptThread instances are rooted on creation, so this is okay
