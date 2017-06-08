@@ -15,6 +15,8 @@ use dom::bindings::error::Fallible;
 use dom::bindings::js::Root;
 use dom::bindings::reflector::DomObject;
 use dom::bindings::str::DOMString;
+use dom::paintrenderingcontext2d::PaintRenderingContext2D;
+use dom::paintsize::PaintSize;
 use dom::workletglobalscope::WorkletGlobalScope;
 use dom::workletglobalscope::WorkletGlobalScopeInit;
 use dom_struct::dom_struct;
@@ -149,10 +151,20 @@ impl PaintWorkletGlobalScope {
             }
         };
 
-        // TODO: Steps 6-10
+        // TODO: Steps 6-7
+        // Step 8
+        let rendering_context = PaintRenderingContext2D::new(self);
+
+        // Step 9
+        let paint_size = PaintSize::new(self, size);
+
+        // TODO: Step 10
         // Steps 11-12
         debug!("Invoking paint function {}.", name);
-        let args = HandleValueArray::new();
+        let args = unsafe { HandleValueArray::from_rooted_slice(&[
+            ObjectValue(rendering_context.reflector().get_jsobject().get()),
+            ObjectValue(paint_size.reflector().get_jsobject().get()),
+        ]) };
         rooted!(in(cx) let mut result = UndefinedValue());
         unsafe { Call(cx, paint_instance.handle(), definition.paint_function.handle(), &args, result.handle_mut()); }
 

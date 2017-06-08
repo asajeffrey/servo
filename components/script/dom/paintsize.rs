@@ -33,12 +33,14 @@ impl PaintSize {
         reflect_dom_object(box PaintSize::new_inherited(size), global, PaintSizeBinding::Wrap)
     }
 }
-                
+
 impl PaintSizeMethods for PaintSize {
+    /// https://drafts.css-houdini.org/css-paint-api/#paintsize
     fn Width(&self) -> Finite<f64> {
         self.width
     }
 
+    /// https://drafts.css-houdini.org/css-paint-api/#paintsize
     fn Height(&self) -> Finite<f64> {
         self.height
     }
