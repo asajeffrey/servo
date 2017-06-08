@@ -48,7 +48,6 @@ use std::sync::mpsc::Sender;
 
 /// https://drafts.css-houdini.org/css-paint-api/#paintworkletglobalscope
 #[dom_struct]
-/// https://drafts.css-houdini.org/css-paint-api/#paintworkletglobalscope
 pub struct PaintWorkletGlobalScope {
     /// The worklet global for this object
     worklet_global: WorkletGlobalScope,
