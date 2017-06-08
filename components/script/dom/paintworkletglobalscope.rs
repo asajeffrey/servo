@@ -13,6 +13,7 @@ use dom::bindings::conversions::get_property;
 use dom::bindings::error::Error;
 use dom::bindings::error::Fallible;
 use dom::bindings::js::Root;
+use dom::bindings::reflector::DomObject;
 use dom::bindings::str::DOMString;
 use dom::workletglobalscope::WorkletGlobalScope;
 use dom::workletglobalscope::WorkletGlobalScopeInit;
@@ -25,6 +26,7 @@ use js::jsapi::HandleValueArray;
 use js::jsapi::Heap;
 use js::jsapi::IsCallable;
 use js::jsapi::IsConstructor;
+use js::jsapi::JSAutoCompartment;
 use js::jsapi::JS_ClearPendingException;
 use js::jsapi::JS_IsExceptionPending;
 use js::jsval::JSVal;
@@ -98,10 +100,12 @@ impl PaintWorkletGlobalScope {
                                size: Size2D<Au>,
                                sender: Sender<Result<Image, PaintWorkletError>>)
     {
-        let cx = self.worklet_global.get_cx();
         let width = size.width.to_px().abs() as u32;
         let height = size.height.to_px().abs() as u32;
         debug!("Invoking a paint callback {}({},{}).", name, width, height);
+
+        let cx = self.worklet_global.get_cx();
+        let _ac = JSAutoCompartment::new(cx, self.worklet_global.reflector().get_jsobject().get());
 
         // TODO: Steps 1-2.1.
         // Step 3.
