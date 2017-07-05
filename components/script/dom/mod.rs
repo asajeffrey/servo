@@ -255,6 +255,7 @@ pub mod cssstylerule;
 pub mod cssstylesheet;
 pub mod cssstylevalue;
 pub mod csssupportsrule;
+pub mod cssurlimagevalue;
 pub mod cssviewportrule;
 pub mod customelementregistry;
 pub mod customevent;
