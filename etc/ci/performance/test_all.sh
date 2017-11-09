@@ -8,6 +8,8 @@ set -o errexit
 set -o nounset
 set -o pipefail
 
+base="http://localhost:8000"
+
 while (( "${#}" ))
 do
 case "${1}" in
@@ -21,6 +23,10 @@ case "${1}" in
     ;;
   --submit)
     submit=1
+    ;;
+  --base)
+    base="${2}"
+    shift
     ;;
   *)
     echo "Unknown option ${1}."
@@ -39,14 +45,13 @@ python3 -m http.server > /dev/null 2>&1 &
 
 # TODO: enable the full manifest when #11087 is fixed
 # https://github.com/servo/servo/issues/11087
-# MANIFEST="page_load_test/test.manifest"
-# MANIFEST="page_load_test/tp5n/20160509.manifest" # A manifest that excludes
-MANIFEST="page_load_test/example.manifest" # A manifest that excludes
-                                                 # timeout test cases
-PERF_FILE="output/perf-$(date +%s).json"
+# MANIFEST="page_load_test/tp5n/tp5n.manifest"
+MANIFEST="page_load_test/test.manifest"
+
+PERF_FILE="output/perf-$(date +%s).csv"
 
 echo "Running tests"
-python3 runner.py ${engine} --runs 3 --timeout "${timeout}" \
+python3 runner.py ${engine} --runs 4 --timeout "${timeout}" --base "${base}" \
   "${MANIFEST}" "${PERF_FILE}"
 
 if [[ "${submit:-}" ]];

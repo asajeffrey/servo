@@ -4,17 +4,43 @@
 
 //! A shareable mutable container for the DOM.
 
-use std::cell::{BorrowError, BorrowMutError, Ref, RefCell, RefMut};
+use std::cell::{BorrowError, BorrowMutError, Ref, UnsafeCell, RefMut};
 use style::thread_state::{self, ThreadState};
 
 /// A mutable field in the DOM.
 ///
 /// This extends the API of `std::cell::RefCell` to allow unsafe access in
 /// certain situations, with dynamic checking in debug builds.
-#[derive(Clone, Debug, Default, MallocSizeOf, PartialEq)]
+
+// HACKERY IS HERE: all the dynamic checks are switched off.
+// THIS IS INCREDIBLY UNSAFE!
+// It's only for testing the performance cost of the dynamic checks.
+// DO NOT UNDER ANY CIRCUMSTANCES MERGE THIS INTO MASTER.
+#[derive(Debug, Default)]
 pub struct DomRefCell<T> {
-    value: RefCell<T>,
+    inner: UnsafeCell<T>,
+    dummy: UnsafeCell<usize>,
 }
+
+impl<T> Clone for DomRefCell<T> where T: Clone {
+    fn clone(&self) -> DomRefCell<T> {
+        DomRefCell::new(unsafe { &*self.inner.get() }.clone())
+    }
+}
+
+impl<T> PartialEq for DomRefCell<T> where T: PartialEq {
+    fn eq(&self, other: &DomRefCell<T>) -> bool {
+        unsafe { &*self.inner.get() }.eq(unsafe { &*other.inner.get() })
+    }
+}
+
+impl<T> ::malloc_size_of::MallocSizeOf for DomRefCell<T>  {
+    fn size_of(&self, _ops: &mut ::malloc_size_of::MallocSizeOfOps) -> usize {
+        0
+    }
+}
+
+unsafe impl<T> Send for DomRefCell<T> where T: Send {}
 
 // Functionality specific to Servo's `DomRefCell` type
 // ===================================================
@@ -26,7 +52,7 @@ impl<T> DomRefCell<T> {
     #[allow(unsafe_code)]
     pub unsafe fn borrow_for_layout(&self) -> &T {
         debug_assert!(thread_state::get().is_layout());
-        &*self.value.as_ptr()
+        &*self.inner.get()
     }
 
     /// Borrow the contents for the purpose of GC tracing.
@@ -38,7 +64,7 @@ impl<T> DomRefCell<T> {
         // FIXME: IN_GC isn't reliable enough - doesn't catch minor GCs
         // https://github.com/servo/servo/issues/6389
         // debug_assert!(thread_state::get().contains(SCRIPT | IN_GC));
-        &*self.value.as_ptr()
+        &*self.inner.get()
     }
 
     /// Borrow the contents for the purpose of script deallocation.
@@ -46,14 +72,14 @@ impl<T> DomRefCell<T> {
     #[allow(unsafe_code)]
     pub unsafe fn borrow_for_script_deallocation(&self) -> &mut T {
         debug_assert!(thread_state::get().contains(ThreadState::SCRIPT));
-        &mut *self.value.as_ptr()
+        &mut *self.inner.get()
     }
 
     /// Version of the above that we use during restyle while the script thread
     /// is blocked.
     pub fn borrow_mut_for_layout(&self) -> RefMut<T> {
         debug_assert!(thread_state::get().is_layout());
-        self.value.borrow_mut()
+        self.borrow_mut()
     }
 }
 
@@ -63,7 +89,8 @@ impl<T> DomRefCell<T> {
     /// Create a new `DomRefCell` containing `value`.
     pub fn new(value: T) -> DomRefCell<T> {
         DomRefCell {
-            value: RefCell::new(value),
+            inner: UnsafeCell::new(value),
+            dummy: UnsafeCell::new(0),
         }
     }
 
@@ -79,7 +106,7 @@ impl<T> DomRefCell<T> {
     ///
     /// Panics if the value is currently mutably borrowed.
     pub fn borrow(&self) -> Ref<T> {
-        self.try_borrow().expect("DomRefCell<T> already mutably borrowed")
+        unsafe { ::std::mem::transmute((self.inner.get(), self.dummy.get())) }
     }
 
     /// Mutably borrows the wrapped value.
@@ -93,7 +120,7 @@ impl<T> DomRefCell<T> {
     ///
     /// Panics if the value is currently borrowed.
     pub fn borrow_mut(&self) -> RefMut<T> {
-        self.try_borrow_mut().expect("DomRefCell<T> already borrowed")
+        unsafe { ::std::mem::transmute((self.inner.get(), self.dummy.get())) }
     }
 
     /// Attempts to immutably borrow the wrapped value.
@@ -108,7 +135,7 @@ impl<T> DomRefCell<T> {
     /// Panics if this is called off the script thread.
     pub fn try_borrow(&self) -> Result<Ref<T>, BorrowError> {
         debug_assert!(thread_state::get().is_script());
-        self.value.try_borrow()
+        Ok(self.borrow())
     }
 
     /// Mutably borrows the wrapped value.
@@ -123,6 +150,6 @@ impl<T> DomRefCell<T> {
     /// Panics if this is called off the script thread.
     pub fn try_borrow_mut(&self) -> Result<RefMut<T>, BorrowMutError> {
         debug_assert!(thread_state::get().is_script());
-        self.value.try_borrow_mut()
+        Ok(self.borrow_mut())
     }
 }
