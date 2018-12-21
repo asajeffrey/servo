@@ -60,6 +60,7 @@ use std::cell::Cell;
 use std::collections::hash_map::Entry;
 use std::collections::HashMap;
 use std::ffi::CString;
+use std::future::Future;
 use std::rc::Rc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
@@ -506,6 +507,11 @@ impl GlobalScope {
             return worker.websocket_task_source();
         }
         unreachable!();
+    }
+
+    /// Await a future
+    pub fn await_future<F: Future>(&self, future: F) -> Option<F::Output> {
+        ScriptThread::await_future(self.pipeline_id, future)
     }
 
     /// Evaluate JS code on this global scope.

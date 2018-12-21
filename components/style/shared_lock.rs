@@ -14,6 +14,8 @@ use servo_arc::Arc;
 use std::cell::UnsafeCell;
 use std::fmt;
 #[cfg(feature = "servo")]
+use std::future::Future;
+#[cfg(feature = "servo")]
 use std::mem;
 #[cfg(feature = "gecko")]
 use std::ptr;
@@ -73,11 +75,17 @@ impl SharedRwLock {
         }
     }
 
-    /// Obtain the lock for reading (servo).
+    /// Obtain the lock for reading (servo, sync).
     #[cfg(feature = "servo")]
     pub fn read(&self) -> SharedRwLockReadGuard {
         mem::forget(self.arc.read());
         SharedRwLockReadGuard(self)
+    }
+
+    /// Obtain the lock for reading (servo, async).
+    #[cfg(feature = "servo")]
+    pub fn read_async(&self) -> impl Future<Output=SharedRwLockReadGuard> {
+        FutureSharedRwLockReadGuard(self)
     }
 
     /// Obtain the lock for reading (gecko).
@@ -86,17 +94,35 @@ impl SharedRwLock {
         SharedRwLockReadGuard(self.cell.borrow())
     }
 
-    /// Obtain the lock for writing (servo).
+    /// Obtain the lock for writing (servo, sync).
     #[cfg(feature = "servo")]
     pub fn write(&self) -> SharedRwLockWriteGuard {
         mem::forget(self.arc.write());
         SharedRwLockWriteGuard(self)
     }
 
+    /// Obtain the lock for writeing (servo, async).
+    #[cfg(feature = "servo")]
+    pub fn write_async(&self) -> impl Future<Output=SharedRwLockWriteGuard> {
+        FutureSharedRwLockWriteGuard(self)
+    }
+
     /// Obtain the lock for writing (gecko).
     #[cfg(feature = "gecko")]
     pub fn write(&self) -> SharedRwLockWriteGuard {
         SharedRwLockWriteGuard(self.cell.borrow_mut())
+    }
+}
+
+/// Future proof that a shared lock was obtained for reading (servo).
+#[cfg(feature = "servo")]
+pub struct FutureSharedRwLockReadGuard<'a>(&'a SharedRwLock);
+#[cfg(feature = "servo")]
+impl<'a> Future for FutureSharedRwLockReadGuard<'a> {
+    type Output = SharedRwLockReadGuard<'a>;
+    fn poll(self: ::std::pin::Pin<&mut Self>, _: &::std::task::LocalWaker) -> ::std::task::Poll<Self::Output> {
+        // Just do this synchronously for now
+        ::std::task::Poll::Ready(self.0.read())
     }
 }
 
@@ -112,6 +138,18 @@ impl<'a> Drop for SharedRwLockReadGuard<'a> {
         // Unsafe: self.lock is private to this module, only ever set after `read()`,
         // and never copied or cloned (see `compile_time_assert` below).
         unsafe { self.0.arc.force_unlock_read() }
+    }
+}
+
+/// Future proof that a shared lock was obtained for writeing (servo).
+#[cfg(feature = "servo")]
+pub struct FutureSharedRwLockWriteGuard<'a>(&'a SharedRwLock);
+#[cfg(feature = "servo")]
+impl<'a> Future for FutureSharedRwLockWriteGuard<'a> {
+    type Output = SharedRwLockWriteGuard<'a>;
+    fn poll(self: ::std::pin::Pin<&mut Self>, _: &::std::task::LocalWaker) -> ::std::task::Poll<Self::Output> {
+        // Just do this synchronously for now
+        ::std::task::Poll::Ready(self.0.write())
     }
 }
 

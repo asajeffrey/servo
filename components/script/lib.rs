@@ -6,6 +6,7 @@
 #![cfg_attr(feature = "unstable", feature(on_unimplemented))]
 #![feature(const_fn)]
 #![feature(drain_filter)]
+#![feature(futures_api)]
 #![feature(plugin)]
 #![feature(try_from)]
 #![deny(unsafe_code)]

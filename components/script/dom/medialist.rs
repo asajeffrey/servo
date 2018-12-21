@@ -62,7 +62,8 @@ impl MediaList {
 impl MediaListMethods for MediaList {
     // https://drafts.csswg.org/cssom/#dom-medialist-mediatext
     fn MediaText(&self) -> DOMString {
-        let guard = self.shared_lock().read();
+        let future = self.shared_lock().read_async();
+        let guard = self.global().await_future(future).expect("Script thread shut down during media query");
         DOMString::from(self.media_queries.read_with(&guard).to_css_string())
     }
 

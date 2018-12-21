@@ -24,6 +24,7 @@
 //! [selectors]: ../selectors/index.html
 
 #![deny(missing_docs)]
+#![cfg_attr(feature = "servo", feature(futures_api))]
 
 extern crate app_units;
 extern crate arrayvec;

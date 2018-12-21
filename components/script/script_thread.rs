@@ -138,12 +138,19 @@ use std::cell::Cell;
 use std::cell::RefCell;
 use std::collections::{hash_map, HashMap, HashSet};
 use std::default::Default;
+use std::future::Future;
+use std::mem;
 use std::ops::Deref;
 use std::option::Option;
+use std::pin::Pin;
 use std::ptr;
 use std::rc::Rc;
 use std::result::Result;
 use std::sync::Arc;
+use std::task::local_waker;
+use std::task::LocalWaker;
+use std::task::Poll;
+use std::task::Wake;
 use std::thread;
 use std::time::{Duration, SystemTime};
 use style::thread_state::{self, ThreadState};
@@ -381,6 +388,12 @@ impl ScriptChan for SendableMainThreadScriptChan {
 #[derive(JSTraceable)]
 pub struct MainThreadScriptChan(pub Sender<MainThreadScriptMsg>);
 
+impl Wake for MainThreadScriptChan {
+    fn wake(arc_self: &Arc<Self>) {
+        let _ = arc_self.0.send(MainThreadScriptMsg::WakeUp);
+    }
+}
+
 impl ScriptChan for MainThreadScriptChan {
     fn send(&self, msg: CommonScriptMsg) -> Result<(), ()> {
         self.0
@@ -491,10 +504,15 @@ unsafe_no_jsmanaged_fields!(TaskQueue<MainThreadScriptMsg>);
 unsafe_no_jsmanaged_fields!(BackgroundHangMonitorRegister);
 unsafe_no_jsmanaged_fields!(BackgroundHangMonitor);
 
+unsafe_no_jsmanaged_fields!(LocalWaker);
+unsafe_no_jsmanaged_fields!(MixedMessage);
+
 #[derive(JSTraceable)]
 // ScriptThread instances are rooted on creation, so this is okay
 #[allow(unrooted_must_root)]
 pub struct ScriptThread {
+    /// Is the script thread still running?
+    running: Cell<bool>,
     /// The documents for pipelines managed by this thread
     documents: DomRefCell<Documents>,
     /// The window proxies known by this thread
@@ -527,6 +545,16 @@ pub struct ScriptThread {
     /// A channel to hand out to script thread-based entities that need to be able to enqueue
     /// events in the event queue.
     chan: MainThreadScriptChan,
+
+    /// The buffer of messages waiting to be handled
+    buffer: DomRefCell<Vec<MixedMessage>>,
+
+    /// Pipelines can be waiting on future results, if they are then we buffer up any messages
+    /// for them.
+    waiting_pipelines: DomRefCell<HashMap<PipelineId, Vec<MixedMessage>>>,
+
+    /// We wake up the script thread by sending a `WakeUp` message to it.
+    waker: LocalWaker,
 
     dom_manipulation_task_sender: Box<dyn ScriptChan>,
 
@@ -1003,6 +1031,18 @@ impl ScriptThread {
         })
     }
 
+    pub fn await_future<F: Future>(
+        pipeline_id: PipelineId,
+        future: F,
+    ) -> Option<F::Output> {
+        SCRIPT_THREAD_ROOT.with(|root| {
+            root.get().and_then(|script_thread| {
+                let script_thread = unsafe { &*script_thread };
+                script_thread.wait_for_future(pipeline_id, future)
+            })
+        })
+    }
+
     /// Creates a new script thread.
     pub fn new(
         state: InitialScriptState,
@@ -1039,7 +1079,11 @@ impl ScriptThread {
             Duration::from_millis(5000),
         );
 
+        // The futures API doesn't give a safe way to implement a waker.
+        let waker = unsafe { local_waker(Arc::new(MainThreadScriptChan(chan.clone()))) };
+
         ScriptThread {
+            running: Cell::new(true),
             documents: DomRefCell::new(Documents::new()),
             window_proxies: DomRefCell::new(HashMap::new()),
             incomplete_loads: DomRefCell::new(vec![]),
@@ -1060,6 +1104,9 @@ impl ScriptThread {
             background_hang_monitor,
 
             chan: MainThreadScriptChan(chan.clone()),
+            buffer: DomRefCell::new(Vec::new()),
+            waiting_pipelines: DomRefCell::new(HashMap::new()),
+            waker: waker,
             dom_manipulation_task_sender: boxed_script_sender.clone(),
             media_element_task_sender: chan.clone(),
             user_interaction_task_sender: chan.clone(),
@@ -1118,19 +1165,70 @@ impl ScriptThread {
         self.js_runtime.cx()
     }
 
+    /// Block until the future is ready.
+    /// Returns Some(result) when the future is ready,
+    /// returns None if the pipeline is closed.
+    fn wait_for_future<F: Future>(
+        &self,
+        pipeline_id: PipelineId,
+        mut future: F,
+    ) -> Option<F::Output> {
+        // Honest this is safe, we don't move the future.
+        let mut pinned = unsafe { Pin::new_unchecked(&mut future) };
+        let running = self.start_waiting(pipeline_id);
+
+        while self.is_waiting(pipeline_id) {
+            match pinned.as_mut().poll(&self.waker) {
+                Poll::Ready(x) => {
+                    if running {
+                        self.finish_waiting(pipeline_id);
+                    }
+                    return Some(x);
+                },
+                Poll::Pending => self.handle_msgs(),
+            }
+        }
+
+        // If we get here, the pipeline must have been closed, so we return nothing
+        None
+
+        // At this point the future is dropped without having been moved,
+        // so pinning it was safe.
+    }
+
+    fn start_waiting(&self, pipeline_id: PipelineId) -> bool {
+        match self.waiting_pipelines.borrow_mut().entry(pipeline_id) {
+            hash_map::Entry::Occupied(_) => false,
+            hash_map::Entry::Vacant(entry) => {
+                entry.insert(vec![]);
+                true
+            },
+        }
+    }
+
+    fn finish_waiting(&self, pipeline_id: PipelineId) {
+        if let Some(buffer) = self.waiting_pipelines.borrow_mut().remove(&pipeline_id) {
+            self.buffer.borrow_mut().extend(buffer);
+        }
+    }
+
+    fn is_waiting(&self, pipeline_id: PipelineId) -> bool {
+        self.running.get() && self.waiting_pipelines.borrow().contains_key(&pipeline_id)
+    }
+
     /// Starts the script thread. After calling this method, the script thread will loop receiving
     /// messages on its port.
     pub fn start(&self) {
         debug!("Starting script thread.");
-        while self.handle_msgs() {
-            // Go on...
+        while self.running.get() {
             debug!("Running script thread.");
+            self.handle_msgs();
         }
         debug!("Stopped script thread.");
     }
 
     /// Handle incoming control messages.
-    fn handle_msgs(&self) -> bool {
+    fn handle_msgs(&self) {
         use self::MixedMessage::{FromConstellation, FromDevtools, FromImageCache};
         use self::MixedMessage::{FromScheduler, FromScript};
 
@@ -1150,14 +1248,14 @@ impl ScriptThread {
         }
 
         // Store new resizes, and gather all other events.
-        let mut sequential = vec![];
+        let mut sequential = mem::replace(&mut *self.buffer.borrow_mut(), vec![]);
 
         // Notify the background-hang-monitor we are waiting for an event.
         self.background_hang_monitor.notify_wait();
 
         // Receive at least one message so we don't spinloop.
         debug!("Waiting for event.");
-        let mut event = select! {
+        let mut event = sequential.pop().unwrap_or_else(|| select! {
             recv(self.task_queue.select()) -> msg => {
                 self.task_queue.take_tasks(msg.unwrap());
                 FromScript(self.task_queue.recv().unwrap())
@@ -1167,7 +1265,7 @@ impl ScriptThread {
             recv(self.devtools_chan.as_ref().map(|_| &self.devtools_port).unwrap_or(&crossbeam_channel::never())) -> msg
                 => FromDevtools(msg.unwrap()),
             recv(self.image_cache_port) -> msg => FromImageCache(msg.unwrap()),
-        };
+        });
         debug!("Got event.");
 
         // Squash any pending resize, reflow, animation tick, and mouse-move events in the queue.
@@ -1243,6 +1341,13 @@ impl ScriptThread {
                         Some(index) => sequential[index] = event,
                     }
                 },
+                FromConstellation(ConstellationControlMsg::ExitScriptThread) => {
+                    self.handle_exit_script_thread_msg()
+                },
+                FromConstellation(ConstellationControlMsg::ExitPipeline(
+                    pipeline_id,
+                    discard_browsing_context,
+                )) => self.handle_exit_pipeline_msg(pipeline_id, discard_browsing_context),
                 _ => {
                     sequential.push(event);
                 },
@@ -1277,27 +1382,28 @@ impl ScriptThread {
             let category = self.categorize_msg(&msg);
             let pipeline_id = self.message_to_pipeline(&msg);
 
-            let result = self.profile_event(category, pipeline_id, move || {
-                match msg {
-                    FromConstellation(ConstellationControlMsg::ExitScriptThread) => {
-                        self.handle_exit_script_thread_msg();
-                        return Some(false);
-                    },
-                    FromConstellation(inner_msg) => self.handle_msg_from_constellation(inner_msg),
-                    FromScript(inner_msg) => self.handle_msg_from_script(inner_msg),
-                    FromScheduler(inner_msg) => self.handle_timer_event(inner_msg),
-                    FromDevtools(inner_msg) => self.handle_msg_from_devtools(inner_msg),
-                    FromImageCache(inner_msg) => self.handle_msg_from_image_cache(inner_msg),
+            // Messages to waiting pipelines (other than exit messages!)
+            // are buffered to be processed when the pipeline stops waiting.
+            if let Some(pipeline_id) = pipeline_id {
+                if let Some(buffer) = self.waiting_pipelines.borrow_mut().get_mut(&pipeline_id) {
+                    buffer.push(msg);
+                    continue;
                 }
+            }
 
-                None
+            self.profile_event(category, pipeline_id, move || match msg {
+                FromConstellation(inner_msg) => self.handle_msg_from_constellation(inner_msg),
+                FromScript(inner_msg) => self.handle_msg_from_script(inner_msg),
+                FromScheduler(inner_msg) => self.handle_timer_event(inner_msg),
+                FromDevtools(inner_msg) => self.handle_msg_from_devtools(inner_msg),
+                FromImageCache(inner_msg) => self.handle_msg_from_image_cache(inner_msg),
             });
 
             // https://html.spec.whatwg.org/multipage/#event-loop-processing-model step 6
             self.perform_a_microtask_checkpoint();
 
-            if let Some(retval) = result {
-                return retval;
+            if !self.running.get() {
+                return;
             }
         }
 
@@ -1333,8 +1439,6 @@ impl ScriptThread {
                 window.reflow(ReflowGoal::Full, ReflowReason::MissingExplicitReflow);
             }
         }
-
-        true
     }
 
     fn categorize_msg(&self, msg: &MixedMessage) -> ScriptThreadEventCategory {
@@ -1644,9 +1748,6 @@ impl ScriptThread {
                 self.handle_css_error_reporting(pipeline_id, filename, line, column, msg)
             },
             ConstellationControlMsg::Reload(pipeline_id) => self.handle_reload(pipeline_id),
-            ConstellationControlMsg::ExitPipeline(pipeline_id, discard_browsing_context) => {
-                self.handle_exit_pipeline_msg(pipeline_id, discard_browsing_context)
-            },
             ConstellationControlMsg::WebVREvents(pipeline_id, events) => {
                 self.handle_webvr_events(pipeline_id, events)
             },
@@ -1657,6 +1758,7 @@ impl ScriptThread {
             msg @ ConstellationControlMsg::Viewport(..) |
             msg @ ConstellationControlMsg::SetScrollState(..) |
             msg @ ConstellationControlMsg::Resize(..) |
+            msg @ ConstellationControlMsg::ExitPipeline(..) |
             msg @ ConstellationControlMsg::ExitScriptThread => {
                 panic!("should have handled {:?} already", msg)
             },
@@ -2357,6 +2459,9 @@ impl ScriptThread {
             return warn!("Exiting nonexistant pipeline {}.", id);
         };
 
+        // Discard any buffered messages.
+        self.waiting_pipelines.borrow_mut().remove(&id);
+
         // We shut down layout before removing the document,
         // since layout might still be in the middle of laying it out.
         debug!("preparing to shut down layout for page {}", id);
@@ -2394,6 +2499,7 @@ impl ScriptThread {
     /// Handles a request to exit the script thread and shut down layout.
     fn handle_exit_script_thread_msg(&self) {
         debug!("Exiting script thread.");
+        self.running.set(false);
 
         let mut pipeline_ids = Vec::new();
         pipeline_ids.extend(
