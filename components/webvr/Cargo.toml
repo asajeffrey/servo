@@ -13,6 +13,7 @@ path = "lib.rs"
 [features]
 googlevr = ['rust-webvr/googlevr']
 oculusvr = ['rust-webvr/oculusvr']
+magicleap = ['rust-webvr/magicleap']
 
 [dependencies]
 canvas_traits = {path = "../canvas_traits"}
