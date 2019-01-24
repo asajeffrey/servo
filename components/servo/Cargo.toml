@@ -23,6 +23,7 @@ webrender_debugger = ["webrender/debugger"]
 no_static_freetype = ["webrender/no_static_freetype"]
 magicleap = ["webvr/magicleap"]
 oculusvr = ["webvr/oculusvr"]
+fullscreenvr = ["webvr/fullscreen"]
 unstable = [
     "euclid/unstable",
     "profile/unstable",

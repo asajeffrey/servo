@@ -38,6 +38,7 @@ unstable = ["libservo/unstable"]
 webgl_backtrace = ["libservo/webgl_backtrace"]
 webrender_debugger = ["libservo/webrender_debugger"]
 js_backtrace = ["libservo/js_backtrace"]
+fullscreenvr = ["libservo/fullscreenvr"]
 
 [target.'cfg(not(target_os = "android"))'.dependencies]
 backtrace = "0.3"
