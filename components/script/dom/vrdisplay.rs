@@ -115,12 +115,10 @@ impl VRDisplay {
             presenting: Cell::new(false),
             left_eye_params: MutDom::new(&*VREyeParameters::new(
                 display.left_eye_parameters.clone(),
-                VREye::Left,
                 &global,
             )),
             right_eye_params: MutDom::new(&*VREyeParameters::new(
                 display.right_eye_parameters.clone(),
-                VREye::Right,
                 &global,
             )),
             capabilities: MutDom::new(&*VRDisplayCapabilities::new(
