@@ -3310,24 +3310,26 @@ dependencies = [
 
 [[package]]
 name = "rust-webvr"
-version = "0.10.0"
+version = "0.10.2"
 dependencies = [
  "bindgen 0.46.0 (registry+https://github.com/rust-lang/crates.io-index)",
  "euclid 0.19.4 (registry+https://github.com/rust-lang/crates.io-index)",
  "gl_generator 0.10.0 (registry+https://github.com/rust-lang/crates.io-index)",
+ "gleam 0.6.8 (registry+https://github.com/rust-lang/crates.io-index)",
  "gvr-sys 0.7.0 (registry+https://github.com/rust-lang/crates.io-index)",
  "libc 0.2.44 (registry+https://github.com/rust-lang/crates.io-index)",
  "libloading 0.5.0 (registry+https://github.com/rust-lang/crates.io-index)",
  "log 0.4.5 (registry+https://github.com/rust-lang/crates.io-index)",
  "ovr-mobile-sys 0.4.0 (registry+https://github.com/rust-lang/crates.io-index)",
- "rust-webvr-api 0.10.0",
+ "rust-webvr-api 0.10.4",
 ]
 
 [[package]]
 name = "rust-webvr-api"
-version = "0.10.0"
+version = "0.10.4"
 dependencies = [
  "android_injected_glue 0.2.3 (registry+https://github.com/rust-lang/crates.io-index)",
+ "gleam 0.6.8 (registry+https://github.com/rust-lang/crates.io-index)",
  "serde 1.0.80 (registry+https://github.com/rust-lang/crates.io-index)",
  "serde_derive 1.0.80 (registry+https://github.com/rust-lang/crates.io-index)",
  "time 0.1.42 (registry+https://github.com/rust-lang/crates.io-index)",
@@ -4836,8 +4838,8 @@ dependencies = [
  "ipc-channel 0.11.2 (registry+https://github.com/rust-lang/crates.io-index)",
  "log 0.4.5 (registry+https://github.com/rust-lang/crates.io-index)",
  "msg 0.0.1",
- "rust-webvr 0.10.0",
- "rust-webvr-api 0.10.0",
+ "rust-webvr 0.10.2",
+ "rust-webvr-api 0.10.4",
  "script_traits 0.0.1",
  "servo_config 0.0.1",
  "servo_geometry 0.0.1",
@@ -4851,7 +4853,7 @@ version = "0.0.1"
 dependencies = [
  "ipc-channel 0.11.2 (registry+https://github.com/rust-lang/crates.io-index)",
  "msg 0.0.1",
- "rust-webvr-api 0.10.0",
+ "rust-webvr-api 0.10.4",
  "serde 1.0.80 (registry+https://github.com/rust-lang/crates.io-index)",
 ]
 
