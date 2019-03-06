@@ -24,3 +24,5 @@ opt-level = 3
 #
 #     [patch."https://github.com/servo/<repository>"]
 #     <crate> = { path = "/path/to/local/checkout" }
+[patch."https://github.com/pcwalton/pathfinder"]
+pathfinder_font_renderer = { path = "../pathfinder/font-renderer" }
