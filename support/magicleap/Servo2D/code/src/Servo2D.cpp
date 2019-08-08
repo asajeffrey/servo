@@ -27,9 +27,6 @@ const float PRISM_W = 2.0;
 const float PRISM_H = 0.75;
 const float PRISM_D = 2.0;
 
-// The length of the laser pointer (in m).
-const float LASER_LENGTH = 10.0;
-
 // The width of the keyboard
 const float KEYBOARD_W = 0.666;
 
@@ -217,14 +214,6 @@ int Servo2D::init() {
   url_bar_->setKeyboardProperties(keyboard_properties);
   url_bar_->onFocusLostSub(std::bind(&Servo2D::urlBarEventListener, this));
 
-  // Add the laser pointer
-  laser_ = lumin::LineNode::CastFrom(prism_->findNode(Servo2D_exportedNodes::laser, root_node));
-  if (!laser_) {
-    ML_LOG(Error, "Servo2D Failed to get laser");
-    abort();
-    return 1;
-  }
-
   return 0;
 }
 
@@ -318,43 +307,6 @@ bool Servo2D::pose6DofEventListener(lumin::ControlPose6DofInputEventData* event)
                        controller_orientation_.y, controller_orientation_.z);
   // Bubble up to any other 6DOF handlers
   return false;
-}
-
-glm::vec2 Servo2D::redrawLaser() {
-  // Return (-1, -1) if the laser doesn't intersect z=0
-  glm::vec2 result = glm::vec2(-1.0, -1.0);
-
-  // Convert to prism coordinates
-  glm::vec3 position = glm::inverse(prism_->getTransform()) * glm::vec4(controller_position_, 1.0f);
-  glm::quat orientation = glm::inverse(prism_->getRotation()) * controller_orientation_;
-
-  // 1m in the direction of the controller
-  glm::vec3 direction = orientation * glm::vec3(0.0f, 0.0f, -1.0f);
-  // The endpoint of the laser, in prism coordinates
-  glm::vec3 endpoint = position + direction * LASER_LENGTH;
-
-  // The laser color
-  glm::vec4 color = glm::vec4(1.0, 0.0, 0.0, 1.0);
-
-  // Does the laser intersect z=0?
-  if ((position.z > 0) && (endpoint.z < 0)) {
-    // How far along the laser did it intersect?
-    float ratio = 1.0 / (1.0 - (endpoint.z / position.z));
-    // The intersection point
-    glm::vec3 intersection = ((1 - ratio) * position) + (ratio * endpoint);
-    // Is the intersection inside the viewport?
-    result = viewportPosition(intersection);
-    if (pointInsideViewport(result)) {
-      color = glm::vec4(0.0, 1.0, 0.0, 1.0);
-      endpoint = intersection;
-    }
-  }
-
-  laser_->clearPoints();
-  laser_->addPoints(position);
-  laser_->addPoints(endpoint);
-  laser_->setColor(color);
-  return result;
 }
 
 bool Servo2D::gestureEventListener(lumin::GestureInputEventData* event) {

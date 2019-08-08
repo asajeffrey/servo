@@ -126,11 +126,6 @@ protected:
   glm::vec2 viewportPosition(glm::vec3 prism_pos);
   bool pointInsideViewport(glm::vec2 pt);
 
-  /**
-   * Redraw the laser. Returns the laser endpoint, in viewport coordinates.
-   */
-  glm::vec2 redrawLaser();
-
 private:
   lumin::Prism* prism_ = nullptr;  // represents the bounded space where the App renders.
   lumin::PlanarResource* plane_ = nullptr; // the plane we're rendering into
@@ -139,7 +134,6 @@ private:
   lumin::ui::UiButton* back_button_ = nullptr; // the back button
   lumin::ui::UiButton* fwd_button_ = nullptr; // the forward button
   lumin::ui::UiTextEdit* url_bar_ = nullptr; // the URL bar
-  lumin::LineNode* laser_ = nullptr; // The laser pointer
   glm::vec3 controller_position_; // The last recorded position of the controller (in world coords)
   glm::quat controller_orientation_; // The last recorded orientation of the controller (in world coords)
   bool controller_trigger_down_ = false; // Is the controller trigger currently down?
