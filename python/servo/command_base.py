@@ -377,7 +377,7 @@ class CommandBase(object):
 
         if magicleap:
             base_path = path.join(base_path, "magicleap", "aarch64-linux-android")
-            binary_name = "libmlservo.a"
+            binary_name = "libmlservo.so"
         elif android:
             base_path = path.join(base_path, "android", self.config["android"]["target"])
             simpleservo = True

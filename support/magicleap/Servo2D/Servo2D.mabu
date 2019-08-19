@@ -27,10 +27,8 @@ DATAS = \
     $(GSTREAMER_DIR)/system/lib64/*.so : bin/ \
     $(GSTREAMER_DIR)/system/lib64/gstreamer-1.0/*.so : bin/
 
-STLIBS = \
-    mlservo
-
 SHLIBS = \
+    mlservo \
     glib-2.0 \
     gobject-2.0 \
     gstreamer-1.0 \

@@ -587,6 +587,7 @@ class MachCommands(CommandBase):
             env.setdefault("GSTREAMER_DIR", path.join(target_path, target, "native", "gstreamer-1.16.0"))
             env.setdefault("GSTREAMER_URL", "https://servo-deps.s3.amazonaws.com/gstreamer/gstreamer-magicleap-1.16.0-20190808-110815.tgz")
             env.setdefault("PKG_CONFIG_PATH", path.join(env["GSTREAMER_DIR"], "system", "lib64", "pkgconfig"))
+            env.setdefault("GTK_LIB_DIR", path.join(env["GSTREAMER_DIR"], "system", "lib64"))
 
             # Override the linker set in .cargo/config
             env.setdefault("CARGO_TARGET_AARCH64_LINUX_ANDROID_LINKER", path.join(ml_support, "fake-ld.sh"))
