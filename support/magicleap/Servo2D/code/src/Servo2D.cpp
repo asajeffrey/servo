@@ -39,7 +39,7 @@ const float KEYBOARD_W = 1.333;
 const char* HOME_PAGE = "https://servo.org/ml-home";
 
 // The default command line args
-const char* ARGS = "--pref media.glvideo.enabled"
+const char* DEFAULT_ARGS = "--pref media.glvideo.enabled";
 
 // The locale (currently ML only supports en)
 const lumin::ui::Locale::Code DEFAULT_LOCALE = lumin::ui::Locale::Code::kEn;
