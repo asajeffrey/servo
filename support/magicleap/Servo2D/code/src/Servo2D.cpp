@@ -18,8 +18,8 @@
 #include <string.h>
 
 // The viewport dimensions (in px).
-const int VIEWPORT_W = 852;
-const int VIEWPORT_H = 480;
+const int VIEWPORT_W = 1920;
+const int VIEWPORT_H = 1080;
 
 // The hidpi factor.
 const float HIDPI = 1.0;
@@ -37,6 +37,9 @@ const float KEYBOARD_W = 1.333;
 
 // The home page
 const char* HOME_PAGE = "https://servo.org/ml-home";
+
+// The default command line args
+const char* ARGS = "--pref media.glvideo.enabled"
 
 // The locale (currently ML only supports en)
 const lumin::ui::Locale::Code DEFAULT_LOCALE = lumin::ui::Locale::Code::kEn;
@@ -82,7 +85,7 @@ extern "C" void discard_servo(ServoInstance*);
 // Create a Servo2D instance
 Servo2D::Servo2D(const char* uri, const char* args)
 : uri_(uri ? uri : HOME_PAGE)
-, args_(args)
+, args_(args ? args : DEFAULT_ARGS)
 {
   ML_LOG(Debug, "Servo2D Constructor.");
 }
