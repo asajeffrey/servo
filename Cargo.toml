@@ -28,3 +28,10 @@ opt-level = 3
 # Those are here to dedupe winapi since mio is still using winapi 0.2.
 mio = { git = "https://github.com/servo/mio.git", branch = "servo" }
 iovec = { git = "https://github.com/servo/iovec.git", branch = "servo" }
+
+[patch."https://github.com/servo/media"]
+servo-media = { path = "../media/servo-media" }
+servo-media-gstreamer = { path = "../media/backends/gstreamer" }
+servo-media-audio = { path = "../media/audio" }
+servo-media-player = { path = "../media/player" }
+servo-media-dummy = { path = "../media/backends/dummy" }
