@@ -678,6 +678,7 @@ impl WebGLFramebuffer {
     pub fn check_status(&self) -> u32 {
         match self.backing {
             WebGLFramebufferBacking::Transparent(ref backing) => backing.check_status(),
+            // https://github.com/immersive-web/webxr/issues/854
             WebGLFramebufferBacking::Opaque(_) => constants::FRAMEBUFFER_COMPLETE,
         }
     }
@@ -687,12 +688,16 @@ impl WebGLFramebuffer {
             WebGLFramebufferBacking::Transparent(ref backing) => {
                 backing.check_status_for_rendering(self.context())
             },
+            // https://github.com/immersive-web/webxr/issues/854
+            // TODO: check to see if we are inside an rAF.
+            // https://github.com/immersive-web/webxr/issues/856
             WebGLFramebufferBacking::Opaque(_) => CompleteForRendering::Complete,
         }
     }
 
     pub fn delete(&self, fallible: bool) {
         // Can opaque framebuffers be deleted?
+        // https://github.com/immersive-web/webxr/issues/855
         if let WebGLFramebufferBacking::Transparent(ref backing) = self.backing {
             backing.delete(self.context(), fallible)
         }
@@ -737,6 +742,7 @@ impl WebGLFramebuffer {
 
     pub fn is_deleted(&self) -> bool {
         // Can opaque framebuffers be deleted?
+        // https://github.com/immersive-web/webxr/issues/855
         match self.backing {
             WebGLFramebufferBacking::Transparent(ref backing) => backing.is_deleted(),
             WebGLFramebufferBacking::Opaque(_) => false,
