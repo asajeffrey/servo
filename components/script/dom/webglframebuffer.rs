@@ -14,8 +14,11 @@ use crate::dom::webglrenderbuffer::WebGLRenderbuffer;
 use crate::dom::webglrenderingcontext::WebGLRenderingContext;
 use crate::dom::webgltexture::WebGLTexture;
 use canvas_traits::webgl::{webgl_channel, WebGLError, WebGLResult};
-use canvas_traits::webgl::{WebGLCommand, WebGLFramebufferBindingRequest, WebGLFramebufferId};
+use canvas_traits::webgl::{
+    WebGLCommand, WebGLFramebufferBindingRequest, WebGLFramebufferId, WebGLOpaqueFramebufferId,
+};
 use dom_struct::dom_struct;
+use euclid::default::Size2D;
 use std::cell::Cell;
 
 pub enum CompleteForRendering {
@@ -67,12 +70,10 @@ pub enum WebGLFramebufferAttachmentRoot {
     Texture(DomRoot<WebGLTexture>),
 }
 
-#[dom_struct]
-pub struct WebGLFramebuffer {
-    webgl_object: WebGLObject,
+#[must_root]
+#[derive(JSTraceable, MallocSizeOf)]
+struct WebGLTransparentFramebuffer {
     id: WebGLFramebufferId,
-    /// target can only be gl::FRAMEBUFFER at the moment
-    target: Cell<Option<u32>>,
     is_deleted: Cell<bool>,
     size: Cell<Option<(i32, i32)>>,
     status: Cell<u32>,
@@ -85,12 +86,10 @@ pub struct WebGLFramebuffer {
     is_initialized: Cell<bool>,
 }
 
-impl WebGLFramebuffer {
-    fn new_inherited(context: &WebGLRenderingContext, id: WebGLFramebufferId) -> Self {
+impl WebGLTransparentFramebuffer {
+    fn new(id: WebGLFramebufferId) -> Self {
         Self {
-            webgl_object: WebGLObject::new_inherited(context),
             id: id,
-            target: Cell::new(None),
             is_deleted: Cell::new(false),
             size: Cell::new(None),
             status: Cell::new(constants::FRAMEBUFFER_INCOMPLETE_MISSING_ATTACHMENT),
@@ -102,48 +101,13 @@ impl WebGLFramebuffer {
         }
     }
 
-    pub fn maybe_new(context: &WebGLRenderingContext) -> Option<DomRoot<Self>> {
-        let (sender, receiver) = webgl_channel().unwrap();
-        context.send_command(WebGLCommand::CreateFramebuffer(sender));
-        receiver
-            .recv()
-            .unwrap()
-            .map(|id| WebGLFramebuffer::new(context, id))
-    }
-
-    pub fn new(context: &WebGLRenderingContext, id: WebGLFramebufferId) -> DomRoot<Self> {
-        reflect_dom_object(
-            Box::new(WebGLFramebuffer::new_inherited(context, id)),
-            &*context.global(),
-            WebGLFramebufferBinding::Wrap,
-        )
-    }
-}
-
-impl WebGLFramebuffer {
-    pub fn id(&self) -> WebGLFramebufferId {
+    fn id(&self) -> WebGLFramebufferId {
         self.id
     }
 
-    pub fn bind(&self, target: u32) {
-        // Update the framebuffer status on binding.  It may have
-        // changed if its attachments were resized or deleted while
-        // we've been unbound.
-        self.update_status();
-
-        self.target.set(Some(target));
-        self.upcast::<WebGLObject>()
-            .context()
-            .send_command(WebGLCommand::BindFramebuffer(
-                target,
-                WebGLFramebufferBindingRequest::Explicit(self.id),
-            ));
-    }
-
-    pub fn delete(&self, fallible: bool) {
+    fn delete(&self, context: &WebGLRenderingContext, fallible: bool) {
         if !self.is_deleted.get() {
             self.is_deleted.set(true);
-            let context = self.upcast::<WebGLObject>().context();
             let cmd = WebGLCommand::DeleteFramebuffer(self.id);
             if fallible {
                 context.send_command_ignored(cmd);
@@ -153,11 +117,11 @@ impl WebGLFramebuffer {
         }
     }
 
-    pub fn is_deleted(&self) -> bool {
+    fn is_deleted(&self) -> bool {
         self.is_deleted.get()
     }
 
-    pub fn size(&self) -> Option<(i32, i32)> {
+    fn size(&self) -> Option<(i32, i32)> {
         self.size.get()
     }
 
@@ -256,11 +220,11 @@ impl WebGLFramebuffer {
         }
     }
 
-    pub fn check_status(&self) -> u32 {
+    fn check_status(&self) -> u32 {
         return self.status.get();
     }
 
-    pub fn check_status_for_rendering(&self) -> CompleteForRendering {
+    fn check_status_for_rendering(&self, context: &WebGLRenderingContext) -> CompleteForRendering {
         let result = self.check_status();
         if result != constants::FRAMEBUFFER_COMPLETE {
             return CompleteForRendering::Incomplete;
@@ -289,16 +253,19 @@ impl WebGLFramebuffer {
                     }
                 }
             }
-            self.upcast::<WebGLObject>()
-                .context()
-                .initialize_framebuffer(clear_bits);
+            context.initialize_framebuffer(clear_bits);
             self.is_initialized.set(true);
         }
 
         CompleteForRendering::Complete
     }
 
-    pub fn renderbuffer(&self, attachment: u32, rb: Option<&WebGLRenderbuffer>) -> WebGLResult<()> {
+    fn renderbuffer(
+        &self,
+        context: &WebGLRenderingContext,
+        attachment: u32,
+        rb: Option<&WebGLRenderbuffer>,
+    ) -> WebGLResult<()> {
         let binding = self
             .attachment_binding(attachment)
             .ok_or(WebGLError::InvalidEnum)?;
@@ -316,17 +283,15 @@ impl WebGLFramebuffer {
             _ => None,
         };
 
-        self.upcast::<WebGLObject>()
-            .context()
-            .send_command(WebGLCommand::FramebufferRenderbuffer(
-                constants::FRAMEBUFFER,
-                attachment,
-                constants::RENDERBUFFER,
-                rb_id,
-            ));
+        context.send_command(WebGLCommand::FramebufferRenderbuffer(
+            constants::FRAMEBUFFER,
+            attachment,
+            constants::RENDERBUFFER,
+            rb_id,
+        ));
 
         if rb.is_none() {
-            self.detach_binding(binding, attachment);
+            self.detach_binding(context, binding, attachment);
         }
 
         self.update_status();
@@ -336,12 +301,13 @@ impl WebGLFramebuffer {
 
     fn detach_binding(
         &self,
+        context: &WebGLRenderingContext,
         binding: &DomRefCell<Option<WebGLFramebufferAttachment>>,
         attachment: u32,
     ) {
         *binding.borrow_mut() = None;
         if INTERESTING_ATTACHMENT_POINTS.contains(&attachment) {
-            self.reattach_depth_stencil();
+            self.reattach_depth_stencil(context);
         }
     }
 
@@ -358,28 +324,26 @@ impl WebGLFramebuffer {
         }
     }
 
-    fn reattach_depth_stencil(&self) {
-        let reattach = |attachment: &WebGLFramebufferAttachment, attachment_point| {
-            let context = self.upcast::<WebGLObject>().context();
-            match *attachment {
-                WebGLFramebufferAttachment::Renderbuffer(ref rb) => {
-                    context.send_command(WebGLCommand::FramebufferRenderbuffer(
-                        constants::FRAMEBUFFER,
-                        attachment_point,
-                        constants::RENDERBUFFER,
-                        Some(rb.id()),
-                    ));
-                },
-                WebGLFramebufferAttachment::Texture { ref texture, level } => {
-                    context.send_command(WebGLCommand::FramebufferTexture2D(
-                        constants::FRAMEBUFFER,
-                        attachment_point,
-                        texture.target().expect("missing texture target"),
-                        Some(texture.id()),
-                        level,
-                    ));
-                },
-            }
+    fn reattach_depth_stencil(&self, context: &WebGLRenderingContext) {
+        let reattach = |attachment: &WebGLFramebufferAttachment, attachment_point| match *attachment
+        {
+            WebGLFramebufferAttachment::Renderbuffer(ref rb) => {
+                context.send_command(WebGLCommand::FramebufferRenderbuffer(
+                    constants::FRAMEBUFFER,
+                    attachment_point,
+                    constants::RENDERBUFFER,
+                    Some(rb.id()),
+                ));
+            },
+            WebGLFramebufferAttachment::Texture { ref texture, level } => {
+                context.send_command(WebGLCommand::FramebufferTexture2D(
+                    constants::FRAMEBUFFER,
+                    attachment_point,
+                    texture.target().expect("missing texture target"),
+                    Some(texture.id()),
+                    level,
+                ));
+            },
         };
 
         // Since the DEPTH_STENCIL attachment causes both the DEPTH and STENCIL
@@ -397,7 +361,7 @@ impl WebGLFramebuffer {
         }
     }
 
-    pub fn attachment(&self, attachment: u32) -> Option<WebGLFramebufferAttachmentRoot> {
+    fn attachment(&self, attachment: u32) -> Option<WebGLFramebufferAttachmentRoot> {
         let binding = self.attachment_binding(attachment)?;
         binding
             .borrow()
@@ -405,8 +369,9 @@ impl WebGLFramebuffer {
             .map(WebGLFramebufferAttachment::root)
     }
 
-    pub fn texture2d(
+    fn texture2d(
         &self,
+        context: &WebGLRenderingContext,
         attachment: u32,
         textarget: u32,
         texture: Option<&WebGLTexture>,
@@ -470,18 +435,16 @@ impl WebGLFramebuffer {
             _ => None,
         };
 
-        self.upcast::<WebGLObject>()
-            .context()
-            .send_command(WebGLCommand::FramebufferTexture2D(
-                constants::FRAMEBUFFER,
-                attachment,
-                textarget,
-                tex_id,
-                level,
-            ));
+        context.send_command(WebGLCommand::FramebufferTexture2D(
+            constants::FRAMEBUFFER,
+            attachment,
+            textarget,
+            tex_id,
+            level,
+        ));
 
         if texture.is_none() {
-            self.detach_binding(binding, attachment);
+            self.detach_binding(context, binding, attachment);
         }
 
         self.update_status();
@@ -546,7 +509,7 @@ impl WebGLFramebuffer {
         }
     }
 
-    pub fn detach_renderbuffer(&self, rb: &WebGLRenderbuffer) {
+    fn detach_renderbuffer(&self, context: &WebGLRenderingContext, rb: &WebGLRenderbuffer) {
         let mut depth_or_stencil_updated = false;
         self.with_matching_renderbuffers(rb, |att, name| {
             depth_or_stencil_updated |= INTERESTING_ATTACHMENT_POINTS.contains(&name);
@@ -555,11 +518,11 @@ impl WebGLFramebuffer {
         });
 
         if depth_or_stencil_updated {
-            self.reattach_depth_stencil();
+            self.reattach_depth_stencil(context);
         }
     }
 
-    pub fn detach_texture(&self, texture: &WebGLTexture) {
+    fn detach_texture(&self, context: &WebGLRenderingContext, texture: &WebGLTexture) {
         let mut depth_or_stencil_updated = false;
         self.with_matching_textures(texture, |att, name| {
             depth_or_stencil_updated |= INTERESTING_ATTACHMENT_POINTS.contains(&name);
@@ -568,31 +531,21 @@ impl WebGLFramebuffer {
         });
 
         if depth_or_stencil_updated {
-            self.reattach_depth_stencil();
+            self.reattach_depth_stencil(context);
         }
     }
 
-    pub fn invalidate_renderbuffer(&self, rb: &WebGLRenderbuffer) {
+    fn invalidate_renderbuffer(&self, rb: &WebGLRenderbuffer) {
         self.with_matching_renderbuffers(rb, |_att, _| {
             self.is_initialized.set(false);
             self.update_status();
         });
     }
 
-    pub fn invalidate_texture(&self, texture: &WebGLTexture) {
+    fn invalidate_texture(&self, texture: &WebGLTexture) {
         self.with_matching_textures(texture, |_att, _name| {
             self.update_status();
         });
-    }
-
-    pub fn target(&self) -> Option<u32> {
-        self.target.get()
-    }
-}
-
-impl Drop for WebGLFramebuffer {
-    fn drop(&mut self) {
-        self.delete(true);
     }
 }
 
@@ -601,3 +554,232 @@ static INTERESTING_ATTACHMENT_POINTS: &[u32] = &[
     constants::STENCIL_ATTACHMENT,
     constants::DEPTH_STENCIL_ATTACHMENT,
 ];
+
+#[derive(JSTraceable, MallocSizeOf)]
+struct WebGLOpaqueFramebuffer {
+    id: WebGLOpaqueFramebufferId,
+    size: (i32, i32),
+}
+
+impl WebGLOpaqueFramebuffer {
+    fn new(id: WebGLOpaqueFramebufferId, size: (i32, i32)) -> Self {
+        Self { id, size }
+    }
+}
+
+#[must_root]
+#[derive(JSTraceable, MallocSizeOf)]
+enum WebGLFramebufferBacking {
+    Transparent(WebGLTransparentFramebuffer),
+    Opaque(WebGLOpaqueFramebuffer),
+}
+
+#[dom_struct]
+pub struct WebGLFramebuffer {
+    webgl_object: WebGLObject,
+    backing: WebGLFramebufferBacking,
+    /// target can only be gl::FRAMEBUFFER at the moment
+    target: Cell<Option<u32>>,
+}
+
+impl WebGLFramebuffer {
+    pub fn maybe_new(context: &WebGLRenderingContext) -> Option<DomRoot<Self>> {
+        let (sender, receiver) = webgl_channel().unwrap();
+        context.send_command(WebGLCommand::CreateFramebuffer(sender));
+        let id = receiver.recv().ok()??;
+        Some(WebGLFramebuffer::new(context, id))
+    }
+
+    pub fn new(context: &WebGLRenderingContext, id: WebGLFramebufferId) -> DomRoot<Self> {
+        reflect_dom_object(
+            Box::new(WebGLFramebuffer::new_inherited(context, id)),
+            &*context.global(),
+            WebGLFramebufferBinding::Wrap,
+        )
+    }
+
+    pub fn new_inherited(context: &WebGLRenderingContext, id: WebGLFramebufferId) -> Self {
+        Self {
+            webgl_object: WebGLObject::new_inherited(context),
+            backing: WebGLFramebufferBacking::Transparent(WebGLTransparentFramebuffer::new(id)),
+            target: Cell::new(None),
+        }
+    }
+
+    pub fn maybe_new_opaque(
+        context: &WebGLRenderingContext,
+        size: (i32, i32),
+    ) -> Option<DomRoot<Self>> {
+        let (sender, receiver) = webgl_channel().unwrap();
+        context.send_command(WebGLCommand::CreateOpaqueFramebuffer(
+            Size2D::new(size.0, size.1),
+            sender,
+        ));
+        let id = receiver.recv().ok()??;
+        Some(WebGLFramebuffer::new_opaque(context, id, size))
+    }
+
+    pub fn new_opaque(
+        context: &WebGLRenderingContext,
+        id: WebGLOpaqueFramebufferId,
+        size: (i32, i32),
+    ) -> DomRoot<Self> {
+        reflect_dom_object(
+            Box::new(WebGLFramebuffer::new_inherited_opaque(context, id, size)),
+            &*context.global(),
+            WebGLFramebufferBinding::Wrap,
+        )
+    }
+
+    pub fn new_inherited_opaque(
+        context: &WebGLRenderingContext,
+        id: WebGLOpaqueFramebufferId,
+        size: (i32, i32),
+    ) -> Self {
+        Self {
+            webgl_object: WebGLObject::new_inherited(context),
+            backing: WebGLFramebufferBacking::Opaque(WebGLOpaqueFramebuffer::new(id, size)),
+            target: Cell::new(None),
+        }
+    }
+
+    fn context(&self) -> &WebGLRenderingContext {
+        self.upcast::<WebGLObject>().context()
+    }
+
+    fn transparent(&self) -> WebGLResult<&WebGLTransparentFramebuffer> {
+        match self.backing {
+            WebGLFramebufferBacking::Transparent(ref backing) => Ok(backing),
+            WebGLFramebufferBacking::Opaque(_) => Err(WebGLError::InvalidOperation),
+        }
+    }
+
+    pub fn attachment(&self, attachment: u32) -> Option<WebGLFramebufferAttachmentRoot> {
+        match self.backing {
+            WebGLFramebufferBacking::Transparent(ref backing) => backing.attachment(attachment),
+            WebGLFramebufferBacking::Opaque(_) => {
+                self.context().webgl_error(WebGLError::InvalidOperation);
+                None
+            },
+        }
+    }
+
+    pub fn bind(&self, target: u32) {
+        // Update the framebuffer status on binding.  It may have
+        // changed if its attachments were resized or deleted while
+        // we've been unbound.
+        self.update_status();
+
+        self.target.set(Some(target));
+        self.context()
+            .send_command(WebGLCommand::BindFramebuffer(target, self.id()));
+    }
+
+    pub fn check_status(&self) -> u32 {
+        match self.backing {
+            WebGLFramebufferBacking::Transparent(ref backing) => backing.check_status(),
+            WebGLFramebufferBacking::Opaque(_) => constants::FRAMEBUFFER_COMPLETE,
+        }
+    }
+
+    pub fn check_status_for_rendering(&self) -> CompleteForRendering {
+        match self.backing {
+            WebGLFramebufferBacking::Transparent(ref backing) => {
+                backing.check_status_for_rendering(self.context())
+            },
+            WebGLFramebufferBacking::Opaque(_) => CompleteForRendering::Complete,
+        }
+    }
+
+    pub fn delete(&self, fallible: bool) {
+        // Can opaque framebuffers be deleted?
+        if let WebGLFramebufferBacking::Transparent(ref backing) = self.backing {
+            backing.delete(self.context(), fallible)
+        }
+    }
+
+    pub fn detach_renderbuffer(&self, renderbuffer: &WebGLRenderbuffer) {
+        // Should this error on an opaque framebuffer?
+        if let WebGLFramebufferBacking::Transparent(ref backing) = self.backing {
+            backing.detach_renderbuffer(self.context(), renderbuffer);
+        }
+    }
+
+    pub fn detach_texture(&self, texture: &WebGLTexture) {
+        // Should this error on an opaque framebuffer?
+        if let WebGLFramebufferBacking::Transparent(ref backing) = self.backing {
+            backing.detach_texture(self.context(), texture);
+        }
+    }
+
+    pub fn id(&self) -> WebGLFramebufferBindingRequest {
+        match self.backing {
+            WebGLFramebufferBacking::Transparent(ref backing) => {
+                WebGLFramebufferBindingRequest::Transparent(backing.id)
+            },
+            WebGLFramebufferBacking::Opaque(ref backing) => {
+                WebGLFramebufferBindingRequest::Opaque(backing.id)
+            },
+        }
+    }
+
+    pub fn invalidate_renderbuffer(&self, renderbuffer: &WebGLRenderbuffer) {
+        if let WebGLFramebufferBacking::Transparent(ref backing) = self.backing {
+            backing.invalidate_renderbuffer(renderbuffer);
+        }
+    }
+
+    pub fn invalidate_texture(&self, texture: &WebGLTexture) {
+        if let WebGLFramebufferBacking::Transparent(ref backing) = self.backing {
+            backing.invalidate_texture(texture);
+        }
+    }
+
+    pub fn is_deleted(&self) -> bool {
+        // Can opaque framebuffers be deleted?
+        match self.backing {
+            WebGLFramebufferBacking::Transparent(ref backing) => backing.is_deleted(),
+            WebGLFramebufferBacking::Opaque(_) => false,
+        }
+    }
+
+    pub fn renderbuffer(&self, attachment: u32, rb: Option<&WebGLRenderbuffer>) -> WebGLResult<()> {
+        self.transparent()?
+            .renderbuffer(self.context(), attachment, rb)
+    }
+
+    pub fn size(&self) -> Option<(i32, i32)> {
+        match self.backing {
+            WebGLFramebufferBacking::Transparent(ref backing) => backing.size(),
+            WebGLFramebufferBacking::Opaque(ref backing) => Some(backing.size),
+        }
+    }
+
+    pub fn target(&self) -> Option<u32> {
+        self.target.get()
+    }
+
+    pub fn texture2d(
+        &self,
+        attachment: u32,
+        textarget: u32,
+        texture: Option<&WebGLTexture>,
+        level: i32,
+    ) -> WebGLResult<()> {
+        self.transparent()?
+            .texture2d(self.context(), attachment, textarget, texture, level)
+    }
+
+    fn update_status(&self) {
+        // Can opaque framebuffers ever be incomplete?
+        if let WebGLFramebufferBacking::Transparent(ref backing) = self.backing {
+            backing.update_status();
+        }
+    }
+}
+
+impl Drop for WebGLFramebuffer {
+    fn drop(&mut self) {
+        self.delete(true);
+    }
+}

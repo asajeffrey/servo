@@ -185,19 +185,22 @@ impl XRSession {
             // Step 6-7: XXXManishearth handle inlineVerticalFieldOfView
 
             // XXXManishearth handle inline sessions and composition disabled flag
-            if let Some(layer) = pending.GetBaseLayer() {
-                let attachment = layer.framebuffer().attachment(constants::COLOR_ATTACHMENT0);
-                if let Some(WebGLFramebufferAttachmentRoot::Texture(texture)) = attachment {
-                    let context = layer.Context().context_id().0;
-                    let texture_id = texture.id().get();
-                    if let Some((width, height)) = layer.framebuffer().size() {
-                        let size = Size2D::new(width, height);
-                        self.session
-                            .borrow_mut()
-                            .set_texture(context, texture_id, size);
+            unimplemented!();
+            /*
+                if let Some(layer) = pending.GetBaseLayer() {
+                    let attachment = layer.framebuffer().attachment(constants::COLOR_ATTACHMENT0);
+                    if let Some(WebGLFramebufferAttachmentRoot::Texture(texture)) = attachment {
+                        let context = layer.Context().context_id().0;
+                        let texture_id = texture.id().get();
+                        if let Some((width, height)) = layer.framebuffer().size() {
+                            let size = Size2D::new(width, height);
+                            self.session
+                                .borrow_mut()
+                                .set_texture(context, texture_id, size);
+                        }
                     }
                 }
-            }
+            */
         }
 
         // Step 2

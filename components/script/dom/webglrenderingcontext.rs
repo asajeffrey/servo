@@ -55,9 +55,9 @@ use canvas_traits::webgl::WebGLError::*;
 use canvas_traits::webgl::{
     webgl_channel, AlphaTreatment, DOMToTextureCommand, GLContextAttributes, GLLimits, GlType,
     Parameter, TexDataType, TexFormat, TexParameter, WebGLChan, WebGLCommand,
-    WebGLCommandBacktrace, WebGLContextId, WebGLError,
-    WebGLFramebufferBindingRequest, WebGLMsg, WebGLMsgSender, WebGLProgramId, WebGLResult,
-    WebGLSLVersion, WebGLSendResult, WebGLSender, WebGLVersion, WebVRCommand, YAxisTreatment,
+    WebGLCommandBacktrace, WebGLContextId, WebGLError, WebGLFramebufferBindingRequest, WebGLMsg,
+    WebGLMsgSender, WebGLProgramId, WebGLResult, WebGLSLVersion, WebGLSendResult, WebGLSender,
+    WebGLVersion, WebVRCommand, YAxisTreatment,
 };
 use dom_struct::dom_struct;
 use embedder_traits::EventLoopWaker;
@@ -317,8 +317,10 @@ impl WebGLRenderingContext {
         // Right now surfman generates a new FBO on resize.
         // Send a command to re-bind the framebuffer, if any.
         if let Some(fbo) = self.bound_framebuffer.get() {
-            let id = WebGLFramebufferBindingRequest::Explicit(fbo.id());
-            self.send_command(WebGLCommand::BindFramebuffer(constants::FRAMEBUFFER, id));
+            self.send_command(WebGLCommand::BindFramebuffer(
+                constants::FRAMEBUFFER,
+                fbo.id(),
+            ));
         }
     }
 
@@ -814,14 +816,17 @@ impl WebGLRenderingContext {
                 let image_key = receiver.recv().unwrap();
                 self.webrender_image.set(Some(image_key));
                 image_key
-            }
+            },
             Some(image_key) => {
                 //self.webgl_sender.send_swap_buffers().unwrap();
                 image_key
-            }
+            },
         };
         let context_id = self.context_id();
-        HTMLCanvasDataSource::WebGL { image_key, context_id }
+        HTMLCanvasDataSource::WebGL {
+            image_key,
+            context_id,
+        }
     }
 
     // https://www.khronos.org/registry/webgl/extensions/ANGLE_instanced_arrays/

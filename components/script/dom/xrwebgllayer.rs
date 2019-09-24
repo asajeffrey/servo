@@ -90,51 +90,18 @@ impl XRWebGLLayer {
         // XXXManishearth step 4: check XR compat flag for immersive sessions
 
         let cx = global.get_cx();
-        let old_fbo = context.bound_framebuffer();
-        let old_texture = context
-            .textures()
-            .active_texture_for_image_target(TexImageTarget::Texture2D);
 
         // Step 8.2. "Initialize layer’s framebuffer to a new opaque framebuffer created with context."
-        let framebuffer = context.CreateFramebuffer().ok_or(Error::Operation)?;
+        let resolution = session.with_session(|s| s.recommended_framebuffer_resolution());
+        let size = (resolution.width, resolution.height);
+        let framebuffer =
+            WebGLFramebuffer::maybe_new_opaque(context, size).ok_or(Error::Operation)?;
 
         // Step 8.3. "Allocate and initialize resources compatible with session’s XR device,
         // including GPU accessible memory buffers, as required to support the compositing of layer."
 
-        // Create a new texture with size given by the session's recommended resolution
-        let texture = context.CreateTexture().ok_or(Error::Operation)?;
-        let resolution = session.with_session(|s| s.recommended_framebuffer_resolution());
-        let mut pixels = CustomAutoRooter::new(None);
-        context.BindTexture(constants::TEXTURE_2D, Some(&texture));
-        let sc = context.TexImage2D(
-            constants::TEXTURE_2D,
-            0,
-            constants::RGBA,
-            resolution.width,
-            resolution.height,
-            0,
-            constants::RGBA,
-            constants::UNSIGNED_BYTE,
-            pixels.root(*cx),
-        );
-
-        // Bind the new texture to the framebuffer
-        context.BindFramebuffer(constants::FRAMEBUFFER, Some(&framebuffer));
-        context.FramebufferTexture2D(
-            constants::FRAMEBUFFER,
-            constants::COLOR_ATTACHMENT0,
-            constants::TEXTURE_2D,
-            Some(&texture),
-            0,
-        );
-
-        // Restore the WebGL state while complaining about global mutable state
-        context.BindTexture(constants::TEXTURE_2D, old_texture.as_ref().map(|t| &**t));
-        context.BindFramebuffer(constants::FRAMEBUFFER, old_fbo.as_ref().map(|f| &**f));
-
         // Step 8.4: "If layer’s resources were unable to be created for any reason,
         // throw an OperationError and abort these steps."
-        sc.or(Err(Error::Operation))?;
 
         // Step 9. "Return layer."
         Ok(XRWebGLLayer::new(
