@@ -272,6 +272,7 @@ pub enum WebGLCommand {
     CopyTexSubImage2D(u32, i32, i32, i32, i32, i32, i32, i32),
     CreateBuffer(WebGLSender<Option<WebGLBufferId>>),
     CreateFramebuffer(WebGLSender<Option<WebGLFramebufferId>>),
+    CreateOpaqueFramebuffer(Size2D<i32>, WebGLSender<Option<WebGLOpaqueFramebufferId>>),
     CreateRenderbuffer(WebGLSender<Option<WebGLRenderbufferId>>),
     CreateTexture(WebGLSender<Option<WebGLTextureId>>),
     CreateProgram(WebGLSender<Option<WebGLProgramId>>),
@@ -523,6 +524,7 @@ macro_rules! define_resource_id {
 
 define_resource_id!(WebGLBufferId);
 define_resource_id!(WebGLFramebufferId);
+define_resource_id!(WebGLOpaqueFramebufferId);
 define_resource_id!(WebGLRenderbufferId);
 define_resource_id!(WebGLTextureId);
 define_resource_id!(WebGLProgramId);
@@ -544,9 +546,10 @@ pub enum WebGLError {
     ContextLost,
 }
 
-#[derive(Clone, Copy, Debug, Deserialize, Serialize)]
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
 pub enum WebGLFramebufferBindingRequest {
-    Explicit(WebGLFramebufferId),
+    Transparent(WebGLFramebufferId),
+    Opaque(WebGLOpaqueFramebufferId),
     Default,
 }
 

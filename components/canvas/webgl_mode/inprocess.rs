@@ -33,46 +33,45 @@ impl WebGLComm {
         webvr_compositor: Option<Box<dyn WebVRRenderHandler>>,
         external_images: Arc<Mutex<WebrenderExternalImageRegistry>>,
     ) -> WebGLComm {
-        println!("WebGLThreads::new()");
-        let (sender, receiver) = webgl_channel::<WebGLMsg>().unwrap();
+        unimplemented!()
+        /*
+            println!("WebGLThreads::new()");
+            let (sender, receiver) = webgl_channel::<WebGLMsg>().unwrap();
 
-        // Make a front buffer.
-        let front_buffer = Arc::new(FrontBuffer::new());
+            // This implementation creates a single `WebGLThread` for all the pipelines.
+            let init = WebGLThreadInit {
+                webrender_api_sender,
+                webvr_compositor,
+                external_images,
+                sender: sender.clone(),
+                receiver,
+                adapter: device.adapter(),
+            };
 
-        // This implementation creates a single `WebGLThread` for all the pipelines.
-        let init = WebGLThreadInit {
-            webrender_api_sender,
-            webvr_compositor,
-            external_images,
-            sender: sender.clone(),
-            receiver,
-            front_buffer: front_buffer.clone(),
-            adapter: device.adapter(),
-        };
+            let output_handler = if pref!(dom.webgl.dom_to_texture.enabled) {
+                Some(Box::new(OutputHandler::new(
+                    webrender_gl.clone(),
+                    sender.clone(),
+                )))
+            } else {
+                None
+            };
 
-        let output_handler = if pref!(dom.webgl.dom_to_texture.enabled) {
-            Some(Box::new(OutputHandler::new(
-                webrender_gl.clone(),
-                sender.clone(),
-            )))
-        } else {
-            None
-        };
+            let external = WebGLExternalImages::new(device,
+                                                    context,
+                                                    webrender_gl,
+                                                    front_buffer,
+                                                    sender.clone());
 
-        let external = WebGLExternalImages::new(device,
-                                                context,
-                                                webrender_gl,
-                                                front_buffer,
-                                                sender.clone());
+            WebGLThread::run_on_own_thread(init);
 
-        WebGLThread::run_on_own_thread(init);
-
-        WebGLComm {
-            webgl_threads: WebGLThreads(sender),
-            webxr_handler: external.sendable.clone_box(),
-            image_handler: Box::new(external),
-            output_handler: output_handler.map(|b| b as Box<_>),
-        }
+            WebGLComm {
+                webgl_threads: WebGLThreads(sender),
+                webxr_handler: external.sendable().clone_box(),
+                image_handler: Box::new(external),
+                output_handler: output_handler.map(|b| b as Box<_>),
+            }
+        */
     }
 }
 
@@ -111,7 +110,6 @@ struct WebGLExternalImages {
     webrender_gl: Rc<dyn gl::Gl>,
     front_buffer: Arc<FrontBuffer>,
     locked_front_buffer: Option<SurfaceTexture>,
-    sendable: SendableWebGLExternalImages,
 }
 
 impl WebGLExternalImages {
@@ -127,8 +125,11 @@ impl WebGLExternalImages {
             webrender_gl,
             front_buffer,
             locked_front_buffer: None,
-            sendable: SendableWebGLExternalImages::new(channel),
         }
+    }
+
+    fn sendable(&self) -> SendableWebGLExternalImages {
+        unimplemented!()
     }
 }
 
