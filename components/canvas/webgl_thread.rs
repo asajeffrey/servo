@@ -3,6 +3,8 @@
  * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 
 use crate::webgl_limits::GLLimitsDetect;
+use crate::webgl_mode::WebGLSurfaceBackedFramebuffer;
+use crate::webgl_mode::WebGLSurfaceBackedFramebufferId;
 use byteorder::{ByteOrder, NativeEndian, WriteBytesExt};
 use canvas_traits::webgl::{self, ActiveAttribInfo, ActiveUniformInfo, AlphaTreatment};
 use canvas_traits::webgl::{DOMToTextureCommand, GLContextAttributes, GLLimits, GlType};
@@ -24,6 +26,7 @@ use std::borrow::Cow;
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 use std::sync::{Arc, Mutex};
+use std::sync::RwLock;
 use std::thread;
 use webrender_traits::{WebrenderExternalImageRegistry, WebrenderImageHandlerType};
 
@@ -82,8 +85,9 @@ pub(crate) struct WebGLThread {
     receiver: WebGLReceiver<WebGLMsg>,
     /// The receiver that should be used to send WebGL messages for processing.
     sender: WebGLSender<WebGLMsg>,
-    /// FIXME(pcwalton): Should be one front buffer per context ID!!
-    front_buffer: Arc<FrontBuffer>,
+    /// The surface-backed framebuffers, shared with the exzternal image apis.
+    surface_backed_framebuffers:
+        Arc<RwLock<FnvHashMap<WebGLSurfaceBackedFramebufferId, WebGLSurfaceBackedFramebuffer>>>,
 }
 
 #[derive(PartialEq)]
@@ -99,7 +103,8 @@ pub(crate) struct WebGLThreadInit {
     pub external_images: Arc<Mutex<WebrenderExternalImageRegistry>>,
     pub sender: WebGLSender<WebGLMsg>,
     pub receiver: WebGLReceiver<WebGLMsg>,
-    pub front_buffer: Arc<FrontBuffer>,
+    pub surface_backed_framebuffers:
+        Arc<RwLock<FnvHashMap<WebGLSurfaceBackedFramebufferId, WebGLSurfaceBackedFramebuffer>>>,
     pub adapter: Adapter,
 }
 
@@ -143,7 +148,7 @@ impl WebGLThread {
             external_images,
             sender,
             receiver,
-            front_buffer,
+	    surface_backed_framebuffers,
             adapter,
         }: WebGLThreadInit,
     ) -> Self {
@@ -158,7 +163,7 @@ impl WebGLThread {
             external_images,
             sender,
             receiver,
-            front_buffer,
+	    surface_backed_framebuffers,
         }
     }
 
@@ -488,6 +493,8 @@ impl WebGLThread {
 
     fn handle_swap_buffers(&mut self, context_id: WebGLContextId) {
         println!("handle_swap_buffers()");
+	unimplemented!();
+    /*
         let data = Self::make_current_if_needed_mut(
             &self.device,
             context_id,
@@ -521,6 +528,7 @@ impl WebGLThread {
         println!("... rebound framebuffer {}, new back buffer surface is {:?}",
                  framebuffer,
                  self.device.context_surface_id(&data.ctx).unwrap());
+    */
     }
 
     fn handle_dom_to_texture(&mut self, command: DOMToTextureCommand) {
@@ -980,6 +988,7 @@ impl WebGLImpl {
             },
             WebGLCommand::CreateBuffer(ref chan) => Self::create_buffer(gl, chan),
             WebGLCommand::CreateFramebuffer(ref chan) => Self::create_framebuffer(gl, chan),
+            WebGLCommand::CreateOpaqueFramebuffer(size, ref chan) => unimplemented!(),
             WebGLCommand::CreateRenderbuffer(ref chan) => Self::create_renderbuffer(gl, chan),
             WebGLCommand::CreateTexture(ref chan) => Self::create_texture(gl, chan),
             WebGLCommand::CreateProgram(ref chan) => Self::create_program(gl, chan),
@@ -1721,7 +1730,8 @@ impl WebGLImpl {
                         ctx: &Context,
                         device: &Device) {
         let id = match request {
-            WebGLFramebufferBindingRequest::Explicit(id) => id.get(),
+            WebGLFramebufferBindingRequest::Transparent(id) => id.get(),
+            WebGLFramebufferBindingRequest::Opaque(id) => unimplemented!(),
             WebGLFramebufferBindingRequest::Default => {
                 device.context_surface_framebuffer_object(ctx)
                       .expect("No surface attached!")

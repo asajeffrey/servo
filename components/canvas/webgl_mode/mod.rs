@@ -5,3 +5,5 @@
 mod inprocess;
 pub use self::inprocess::WebGLComm;
 pub use self::inprocess::WebGLExternalImages;
+pub(crate) use self::inprocess::WebGLSurfaceBackedFramebuffer;
+pub(crate) use self::inprocess::WebGLSurfaceBackedFramebufferId;
