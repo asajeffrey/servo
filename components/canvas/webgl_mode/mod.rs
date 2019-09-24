@@ -4,3 +4,4 @@
 
 mod inprocess;
 pub use self::inprocess::WebGLComm;
+pub use self::inprocess::WebGLExternalImages;

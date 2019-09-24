@@ -14,6 +14,7 @@ mod azure_backend;
 mod raqote_backend;
 
 pub use webgl_mode::WebGLComm;
+pub use webgl_mode::WebGLExternalImages;
 
 pub mod canvas_data;
 pub mod canvas_paint_thread;

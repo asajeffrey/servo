@@ -65,6 +65,7 @@ fn webdriver(_port: u16, _constellation: Sender<ConstellationMsg>) {}
 use bluetooth::BluetoothThreadFactory;
 use bluetooth_traits::BluetoothRequest;
 use canvas::WebGLComm;
+use canvas::WebGLExternalImages;
 use canvas_traits::webgl::WebGLThreads;
 use compositing::compositor_thread::{
     CompositorProxy, CompositorReceiver, InitialCompositorState, Msg,
@@ -998,13 +999,17 @@ fn create_webgl_threads<W>(window: &W,
         Device::from_current_context().expect("Failed to create graphics context!")
     };
 
+    let adapter = device.adapter();
+    let context_descriptor = device.context_descriptor(&context);
+    let context_attributes = device.context_descriptor_attributes(&context_descriptor);
+
     let WebGLComm {
         webgl_threads,
         webxr_handler,
         image_handler,
         output_handler,
-    } = WebGLComm::new(Rc::new(device),
-                       Rc::new(RefCell::new(context)),
+    } = WebGLComm::new(device,
+                       context,
                        window.gl(),
                        webrender_api_sender,
                        webvr_compositor.map(|compositor| compositor as Box<_>),
@@ -1014,7 +1019,13 @@ fn create_webgl_threads<W>(window: &W,
     external_image_handlers.set_handler(image_handler, WebrenderImageHandlerType::WebGL);
 
     // Set webxr external image handler for WebGL textures
-    webxr_main_thread.set_webgl(webxr_handler);
+    webxr_main_thread.set_webgl_factory(move |size| {
+        let mut device = Device::new(&adapter).ok()?;
+        let context_descriptor = device.create_context_descriptor(&context_attributes).ok()?;
+        let context = device.create_context(&context_descriptor, &size).ok()?;
+        let images = WebGLExternalImages::new(device, context);
+        Some(Box::new(images))
+    });
 
     // Set DOM to texture handler, if enabled.
     if let Some(output_handler) = output_handler {

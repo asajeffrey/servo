@@ -35,3 +35,7 @@ io-surface = { git = "https://github.com/zakorgy/core-foundation-rs", branch = "
 
 # [patch."https://github.com/pcwalton/rust-offscreen-rendering-context"]
 # surfman = { path = "../rust-offscreen-rendering-context" }
+
+[patch."https://github.com/servo/webxr"]
+webxr = { git = "https://github.com/asajeffrey/webxr", branch = "surfman" }
+webxr-api = { git = "https://github.com/asajeffrey/webxr", branch = "surfman" }

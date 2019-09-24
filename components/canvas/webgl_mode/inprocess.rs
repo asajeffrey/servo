@@ -15,15 +15,16 @@ use servo_config::pref;
 use std::cell::RefCell;
 use std::collections::hash_map::Entry;
 use std::default::Default;
+use std::num::NonZeroU32;
 use std::rc::Rc;
 use std::sync::{Arc, Mutex, MutexGuard, RwLock};
 use surfman::{self, Context, Device, Surface, SurfaceTexture};
 use webrender_traits::{WebrenderExternalImageApi, WebrenderExternalImageRegistry};
-use webxr_api::WebGLExternalImageApi;
+use webxr_api::WebGLExternalImageApi as WebXRExternalImageApi;
 
 pub struct WebGLComm {
     pub webgl_threads: WebGLThreads,
-    pub webxr_handler: Box<dyn webxr_api::WebGLExternalImageApi>,
+    pub webxr_handler: Arc<dyn Fn() -> Box<dyn WebXRExternalImageApi> + Send + Sync>,
     pub image_handler: Box<dyn WebrenderExternalImageApi>,
     pub output_handler: Option<Box<dyn webrender::OutputImageHandler>>,
 }
@@ -31,8 +32,8 @@ pub struct WebGLComm {
 impl WebGLComm {
     /// Creates a new `WebGLComm` object.
     pub fn new(
-        device: Rc<Device>,
-        context: Rc<RefCell<Context>>,
+        device: Device,
+        context: Context,
         webrender_gl: Rc<dyn gl::Gl>,
         webrender_api_sender: webrender_api::RenderApiSender,
         webvr_compositor: Option<Box<dyn WebVRRenderHandler>>,
@@ -80,38 +81,10 @@ impl WebGLComm {
     }
 }
 
-/// Bridge between the webxr_api::ExternalImage callbacks and the WebGLThreads.
-struct SendableWebGLExternalImages {
-    webgl_channel: WebGLSender<WebGLMsg>,
-}
-
-impl SendableWebGLExternalImages {
-    fn new(channel: WebGLSender<WebGLMsg>) -> Self {
-        Self {
-            webgl_channel: channel,
-        }
-    }
-}
-
-impl webxr_api::WebGLExternalImageApi for SendableWebGLExternalImages {
-    fn lock(&self, _id: usize) -> Option<gl::GLsync> {
-        // TODO(pcwalton)
-        None
-    }
-
-    fn unlock(&self, _id: usize) {
-        // TODO(pcwalton)
-    }
-
-    fn clone_box(&self) -> Box<dyn webxr_api::WebGLExternalImageApi> {
-        Box::new(Self::new(self.webgl_channel.clone()))
-    }
-}
-
 /// Bridge between the webrender::ExternalImage callbacks and the WebGLThreads.
-struct WebGLExternalImages {
-    device: Rc<Device>,
-    context: Rc<RefCell<Context>>,
+pub struct WebGLExternalImages {
+    device: Device,
+    context: Context,
     surface_backed_framebuffers:
         Arc<RwLock<FnvHashMap<WebGLSurfaceBackedFramebufferId, WebGLSurfaceBackedFramebuffer>>>,
     locked: Option<(
@@ -132,7 +105,7 @@ pub(crate) struct WebGLSurfaceBackedFramebuffer {
 }
 
 impl WebGLExternalImages {
-    fn new(device: Rc<Device>, context: Rc<RefCell<Context>>) -> Self {
+    pub fn new(device: Device, context: Context) -> Self {
         Self {
             device,
             context,
@@ -153,12 +126,10 @@ impl WebGLExternalImages {
             .front_buffer
             .take()?;
         let surface = surface_box.take()?;
-        let surface_texture = {
-            let mut context = self.context.borrow_mut();
-            self.device
-                .create_surface_texture(&mut *context, surface)
-                .ok()?
-        };
+        let surface_texture = self
+            .device
+            .create_surface_texture(&mut self.context, surface)
+            .ok()?;
         self.unlock_front_buffer();
         self.locked = Some((surface_id, surface_box, surface_texture));
         self.locked.as_mut().map(|locked| &mut locked.2)
@@ -166,12 +137,10 @@ impl WebGLExternalImages {
 
     fn unlock_front_buffer(&mut self) -> Option<()> {
         let (surface_id, mut surface_box, surface_texture) = self.locked.take()?;
-        let surface = {
-            let mut context = self.context.borrow_mut();
-            self.device
-                .destroy_surface_texture(&mut *context, surface_texture)
-                .ok()?
-        };
+        let surface = self
+            .device
+            .destroy_surface_texture(&mut self.context, surface_texture)
+            .ok()?;
         *surface_box = Some(surface);
         let surface_box = self
             .surface_backed_framebuffers
@@ -183,8 +152,12 @@ impl WebGLExternalImages {
         // It is possible that WebGL is generating frames faster than we can render them,
         // in which case the surface box should be disposed of.
         if let Some(surface) = surface_box.and_then(|mut surface_box| surface_box.take()) {
-            let mut context = self.context.borrow_mut();
-            self.device.destroy_surface(&mut *context, surface).ok()?;
+            self.device
+                .destroy_surface(&mut self.context, surface)
+                .ok()?;
+        }
+        Some(())
+    }
 }
 
 impl WebrenderExternalImageApi for WebGLExternalImages {
@@ -196,6 +169,21 @@ impl WebrenderExternalImageApi for WebGLExternalImages {
     }
 
     fn unlock(&mut self, _id: u64) {
+        self.unlock_front_buffer();
+    }
+}
+
+impl WebXRExternalImageApi for WebGLExternalImages {
+    fn lock(&mut self, id: NonZeroU32) -> (u32, Size2D<i32>) {
+        #[allow(unsafe_code)]
+        let framebuffer_id = unsafe { WebGLOpaqueFramebufferId::new(id.get()) };
+        let surface_id = WebGLSurfaceBackedFramebufferId::Opaque(framebuffer_id);
+        self.lock_front_buffer(surface_id)
+            .map(|front_buffer| (front_buffer.gl_texture(), front_buffer.surface().size()))
+            .unwrap_or_default()
+    }
+
+    fn unlock(&mut self, _id: NonZeroU32) {
         self.unlock_front_buffer();
     }
 }
