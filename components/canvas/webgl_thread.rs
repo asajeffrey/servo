@@ -3,7 +3,6 @@
  * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 
 use crate::webgl_limits::GLLimitsDetect;
-use crate::webgl_mode::FrontBuffer;
 use byteorder::{ByteOrder, NativeEndian, WriteBytesExt};
 use canvas_traits::webgl::{self, ActiveAttribInfo, ActiveUniformInfo, AlphaTreatment};
 use canvas_traits::webgl::{DOMToTextureCommand, GLContextAttributes, GLLimits, GlType};

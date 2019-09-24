@@ -3,15 +3,20 @@
  * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 
 use crate::webgl_thread::{WebGLThread, WebGLThreadInit};
-use canvas_traits::webgl::{WebGLMsg, WebGLSender, WebGLThreads, WebVRRenderHandler, webgl_channel};
+use atom::Atom;
+use canvas_traits::webgl::{
+    webgl_channel, WebGLContextId, WebGLFramebufferId, WebGLMsg, WebGLOpaqueFramebufferId,
+    WebGLSender, WebGLThreads, WebVRRenderHandler,
+};
 use euclid::default::Size2D;
 use fnv::FnvHashMap;
 use gleam::gl;
 use servo_config::pref;
 use std::cell::RefCell;
+use std::collections::hash_map::Entry;
 use std::default::Default;
 use std::rc::Rc;
-use std::sync::{Arc, Mutex, MutexGuard};
+use std::sync::{Arc, Mutex, MutexGuard, RwLock};
 use surfman::{self, Context, Device, Surface, SurfaceTexture};
 use webrender_traits::{WebrenderExternalImageApi, WebrenderExternalImageRegistry};
 use webxr_api::WebGLExternalImageApi;
@@ -107,90 +112,91 @@ impl webxr_api::WebGLExternalImageApi for SendableWebGLExternalImages {
 struct WebGLExternalImages {
     device: Rc<Device>,
     context: Rc<RefCell<Context>>,
-    webrender_gl: Rc<dyn gl::Gl>,
-    front_buffer: Arc<FrontBuffer>,
-    locked_front_buffer: Option<SurfaceTexture>,
+    surface_backed_framebuffers:
+        Arc<RwLock<FnvHashMap<WebGLSurfaceBackedFramebufferId, WebGLSurfaceBackedFramebuffer>>>,
+    locked: Option<(
+        WebGLSurfaceBackedFramebufferId,
+        Box<Option<Surface>>,
+        SurfaceTexture,
+    )>,
+}
+
+#[derive(Copy, Clone, Debug, Eq, Hash, PartialEq)]
+pub(crate) enum WebGLSurfaceBackedFramebufferId {
+    Default(WebGLContextId),
+    Opaque(WebGLOpaqueFramebufferId),
+}
+
+pub(crate) struct WebGLSurfaceBackedFramebuffer {
+    front_buffer: Atom<Box<Option<Surface>>>,
 }
 
 impl WebGLExternalImages {
-    fn new(device: Rc<Device>,
-           context: Rc<RefCell<Context>>,
-           webrender_gl: Rc<dyn gl::Gl>,    
-           front_buffer: Arc<FrontBuffer>,
-           channel: WebGLSender<WebGLMsg>)
-           -> Self {
+    fn new(device: Rc<Device>, context: Rc<RefCell<Context>>) -> Self {
         Self {
             device,
             context,
-            webrender_gl,
-            front_buffer,
-            locked_front_buffer: None,
+            surface_backed_framebuffers: Default::default(),
+            locked: None,
         }
     }
 
-    fn sendable(&self) -> SendableWebGLExternalImages {
-        unimplemented!()
+    fn lock_front_buffer(
+        &mut self,
+        surface_id: WebGLSurfaceBackedFramebufferId,
+    ) -> Option<&mut SurfaceTexture> {
+        let mut surface_box = self
+            .surface_backed_framebuffers
+            .read()
+            .ok()?
+            .get(&surface_id)?
+            .front_buffer
+            .take()?;
+        let surface = surface_box.take()?;
+        let surface_texture = {
+            let mut context = self.context.borrow_mut();
+            self.device
+                .create_surface_texture(&mut *context, surface)
+                .ok()?
+        };
+        self.unlock_front_buffer();
+        self.locked = Some((surface_id, surface_box, surface_texture));
+        self.locked.as_mut().map(|locked| &mut locked.2)
     }
+
+    fn unlock_front_buffer(&mut self) -> Option<()> {
+        let (surface_id, mut surface_box, surface_texture) = self.locked.take()?;
+        let surface = {
+            let mut context = self.context.borrow_mut();
+            self.device
+                .destroy_surface_texture(&mut *context, surface_texture)
+                .ok()?
+        };
+        *surface_box = Some(surface);
+        let surface_box = self
+            .surface_backed_framebuffers
+            .read()
+            .ok()?
+            .get(&surface_id)?
+            .front_buffer
+            .set_if_none(surface_box);
+        // It is possible that WebGL is generating frames faster than we can render them,
+        // in which case the surface box should be disposed of.
+        if let Some(surface) = surface_box.and_then(|mut surface_box| surface_box.take()) {
+            let mut context = self.context.borrow_mut();
+            self.device.destroy_surface(&mut *context, surface).ok()?;
 }
 
 impl WebrenderExternalImageApi for WebGLExternalImages {
-    // FIXME(pcwalton): What is the ID for?
     fn lock(&mut self, id: u64) -> (u32, Size2D<i32>) {
-        let (gl_texture, size);
-        match self.front_buffer.take() {
-            None => {
-                gl_texture = 0;
-                size = Size2D::new(0, 0);
-                self.locked_front_buffer = None;
-            }
-            Some(front_buffer) => {
-                let mut context = self.context.borrow_mut();
-                size = front_buffer.size();
-                let locked_front_buffer =
-                    self.device.create_surface_texture(&mut *context, front_buffer).unwrap();
-                gl_texture = locked_front_buffer.gl_texture();
-                self.locked_front_buffer = Some(locked_front_buffer);
-            }
-        }
-        (gl_texture, size)
+        let surface_id = WebGLSurfaceBackedFramebufferId::Default(WebGLContextId(id as usize));
+        self.lock_front_buffer(surface_id)
+            .map(|front_buffer| (front_buffer.gl_texture(), front_buffer.surface().size()))
+            .unwrap_or_default()
     }
 
-    fn unlock(&mut self, id: u64) {
-        self.sendable.unlock(id as usize);
-
-        let locked_front_buffer = match self.locked_front_buffer.take() {
-            None => return,
-            Some(locked_front_buffer) => locked_front_buffer,
-        };
-
-        let mut context = self.context.borrow_mut();
-        let locked_front_buffer = self.device
-                                      .destroy_surface_texture(&mut *context, locked_front_buffer)
-                                      .unwrap();
-
-        let mut front_buffer_slot = self.front_buffer.0.lock().unwrap();
-        if front_buffer_slot.is_none() {
-            *front_buffer_slot = Some(locked_front_buffer);
-            return;
-        }
-
-        self.device.destroy_surface(&mut *context, locked_front_buffer).unwrap();
-    }
-}
-
-pub struct FrontBuffer(Mutex<Option<Surface>>);
-
-impl FrontBuffer {
-    fn new() -> FrontBuffer {
-        FrontBuffer(Mutex::new(None))
-    }
-
-    fn take(&self) -> Option<Surface> {
-        self.0.lock().unwrap().take()
-    }
-
-    pub(crate) fn lock(&self) -> MutexGuard<Option<Surface>> {
-        self.0.lock().unwrap()
+    fn unlock(&mut self, _id: u64) {
+        self.unlock_front_buffer();
     }
 }
 

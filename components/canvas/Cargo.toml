@@ -16,6 +16,7 @@ canvas2d-raqote = ["raqote"]
 webgl_backtrace = ["canvas_traits/webgl_backtrace"]
 
 [dependencies]
+atom = "0.3"
 azure = {git = "https://github.com/servo/rust-azure", optional = true}
 byteorder = "1"
 canvas_traits = {path = "../canvas_traits"}
