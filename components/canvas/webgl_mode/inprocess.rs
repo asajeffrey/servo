@@ -117,7 +117,7 @@ impl WebGLExternalImages {
     fn lock_front_buffer(
         &mut self,
         surface_id: WebGLSurfaceBackedFramebufferId,
-    ) -> Option<&mut SurfaceTexture> {
+    ) -> Option<(u32, Size2D<i32>)> {
         let mut surface_box = self
             .surface_backed_framebuffers
             .read()
@@ -126,13 +126,15 @@ impl WebGLExternalImages {
             .front_buffer
             .take()?;
         let surface = surface_box.take()?;
+	let size = surface.size();
         let surface_texture = self
             .device
             .create_surface_texture(&mut self.context, surface)
             .ok()?;
+	let gl_texture = surface_texture.gl_texture();
         self.unlock_front_buffer();
         self.locked = Some((surface_id, surface_box, surface_texture));
-        self.locked.as_mut().map(|locked| &mut locked.2)
+        Some((gl_texture, size))
     }
 
     fn unlock_front_buffer(&mut self) -> Option<()> {
@@ -163,9 +165,7 @@ impl WebGLExternalImages {
 impl WebrenderExternalImageApi for WebGLExternalImages {
     fn lock(&mut self, id: u64) -> (u32, Size2D<i32>) {
         let surface_id = WebGLSurfaceBackedFramebufferId::Default(WebGLContextId(id as usize));
-        self.lock_front_buffer(surface_id)
-            .map(|front_buffer| (front_buffer.gl_texture(), front_buffer.surface().size()))
-            .unwrap_or_default()
+        self.lock_front_buffer(surface_id).unwrap_or_default()
     }
 
     fn unlock(&mut self, _id: u64) {
@@ -178,9 +178,7 @@ impl WebXRExternalImageApi for WebGLExternalImages {
         #[allow(unsafe_code)]
         let framebuffer_id = unsafe { WebGLOpaqueFramebufferId::new(id.get()) };
         let surface_id = WebGLSurfaceBackedFramebufferId::Opaque(framebuffer_id);
-        self.lock_front_buffer(surface_id)
-            .map(|front_buffer| (front_buffer.gl_texture(), front_buffer.surface().size()))
-            .unwrap_or_default()
+        self.lock_front_buffer(surface_id).unwrap_or_default()
     }
 
     fn unlock(&mut self, _id: NonZeroU32) {

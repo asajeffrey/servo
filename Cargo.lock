@@ -4791,7 +4791,7 @@ dependencies = [
 [[package]]
 name = "surfman"
 version = "0.23.0"
-source = "git+https://github.com/pcwalton/rust-offscreen-rendering-context?branch=io-surface-22#45c843ff55413d088734f16773e4aa484d076518"
+source = "git+https://github.com/pcwalton/rust-offscreen-rendering-context?branch=io-surface-22#5e75ea0000f084e3897ee0e3db24345d22fad62d"
 dependencies = [
  "bitflags 1.1.0 (registry+https://github.com/rust-lang/crates.io-index)",
  "cgl 0.3.2 (registry+https://github.com/rust-lang/crates.io-index)",
