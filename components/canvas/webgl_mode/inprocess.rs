@@ -3,6 +3,7 @@
  * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 
 use crate::webgl_thread::{WebGLThread, WebGLThreadInit};
+use crate::webgl_mode::buffers::FrontBuffers;
 use atom::Atom;
 use canvas_traits::webgl::{
     webgl_channel, WebGLContextId, WebGLFramebufferId, WebGLMsg, WebGLOpaqueFramebufferId,
@@ -85,23 +86,11 @@ impl WebGLComm {
 pub struct WebGLExternalImages {
     device: Device,
     context: Context,
-    surface_backed_framebuffers:
-        Arc<RwLock<FnvHashMap<WebGLSurfaceBackedFramebufferId, WebGLSurfaceBackedFramebuffer>>>,
+    front_buffers: FrontBuffers,
     locked: Option<(
-        WebGLSurfaceBackedFramebufferId,
-        Box<Option<Surface>>,
+        WebGLDoubleBufferId,
         SurfaceTexture,
     )>,
-}
-
-#[derive(Copy, Clone, Debug, Eq, Hash, PartialEq)]
-pub(crate) enum WebGLSurfaceBackedFramebufferId {
-    Default(WebGLContextId),
-    Opaque(WebGLOpaqueFramebufferId),
-}
-
-pub(crate) struct WebGLSurfaceBackedFramebuffer {
-    front_buffer: Atom<Box<Option<Surface>>>,
 }
 
 impl WebGLExternalImages {
@@ -116,16 +105,9 @@ impl WebGLExternalImages {
 
     fn lock_front_buffer(
         &mut self,
-        surface_id: WebGLSurfaceBackedFramebufferId,
+        buffer_id: DoubleBufferId,
     ) -> Option<(u32, Size2D<i32>)> {
-        let mut surface_box = self
-            .surface_backed_framebuffers
-            .read()
-            .ok()?
-            .get(&surface_id)?
-            .front_buffer
-            .take()?;
-        let surface = surface_box.take()?;
+        let surface = self.front_buffers.take()?;
 	let size = surface.size();
         let surface_texture = self
             .device
@@ -133,27 +115,19 @@ impl WebGLExternalImages {
             .ok()?;
 	let gl_texture = surface_texture.gl_texture();
         self.unlock_front_buffer();
-        self.locked = Some((surface_id, surface_box, surface_texture));
+        self.locked = Some((buffer_id, surface_texture));
         Some((gl_texture, size))
     }
 
     fn unlock_front_buffer(&mut self) -> Option<()> {
-        let (surface_id, mut surface_box, surface_texture) = self.locked.take()?;
+        let (buffer_id, surface_texture) = self.locked.take()?;
         let surface = self
             .device
             .destroy_surface_texture(&mut self.context, surface_texture)
             .ok()?;
-        *surface_box = Some(surface);
-        let surface_box = self
-            .surface_backed_framebuffers
-            .read()
-            .ok()?
-            .get(&surface_id)?
-            .front_buffer
-            .set_if_none(surface_box);
         // It is possible that WebGL is generating frames faster than we can render them,
         // in which case the surface box should be disposed of.
-        if let Some(surface) = surface_box.and_then(|mut surface_box| surface_box.take()) {
+        if let Some(surface) = self.front_buffers.put(buffer_id, surface) {
             self.device
                 .destroy_surface(&mut self.context, surface)
                 .ok()?;
@@ -164,8 +138,8 @@ impl WebGLExternalImages {
 
 impl WebrenderExternalImageApi for WebGLExternalImages {
     fn lock(&mut self, id: u64) -> (u32, Size2D<i32>) {
-        let surface_id = WebGLSurfaceBackedFramebufferId::Default(WebGLContextId(id as usize));
-        self.lock_front_buffer(surface_id).unwrap_or_default()
+        let buffer_id = DoubleBufferId::Default(WebGLContextId(id as usize));
+        self.lock_front_buffer(buffer_id).unwrap_or_default()
     }
 
     fn unlock(&mut self, _id: u64) {
@@ -174,11 +148,9 @@ impl WebrenderExternalImageApi for WebGLExternalImages {
 }
 
 impl WebXRExternalImageApi for WebGLExternalImages {
-    fn lock(&mut self, id: NonZeroU32) -> (u32, Size2D<i32>) {
-        #[allow(unsafe_code)]
-        let framebuffer_id = unsafe { WebGLOpaqueFramebufferId::new(id.get()) };
-        let surface_id = WebGLSurfaceBackedFramebufferId::Opaque(framebuffer_id);
-        self.lock_front_buffer(surface_id).unwrap_or_default()
+    fn lock(&mut self, id: u64) -> (u32, Size2D<i32>) {
+        let buffer_id = DoubleBufferId::Opaque(WebGLOpaqueFramebufferId::new(id as usize));
+        self.lock_front_buffer(buffer_id).unwrap_or_default()
     }
 
     fn unlock(&mut self, _id: NonZeroU32) {

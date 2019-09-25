@@ -35,6 +35,7 @@ struct GLContextData {
     gl: Rc<dyn Gl>,
     state: GLState,
     attributes: GLContextAttributes,
+    opaque_framebuffers: Vec<WebGLOpaqueFramebufferId>,
 }
 
 pub struct GLState {
@@ -85,9 +86,9 @@ pub(crate) struct WebGLThread {
     receiver: WebGLReceiver<WebGLMsg>,
     /// The receiver that should be used to send WebGL messages for processing.
     sender: WebGLSender<WebGLMsg>,
-    /// The surface-backed framebuffers, shared with the exzternal image apis.
-    surface_backed_framebuffers:
-        Arc<RwLock<FnvHashMap<WebGLSurfaceBackedFramebufferId, WebGLSurfaceBackedFramebuffer>>>,
+    /// The front and back buffers
+    front_buffers: FrontBuffers,
+    back_buffers: BackBuffers,
 }
 
 #[derive(PartialEq)]
@@ -103,8 +104,6 @@ pub(crate) struct WebGLThreadInit {
     pub external_images: Arc<Mutex<WebrenderExternalImageRegistry>>,
     pub sender: WebGLSender<WebGLMsg>,
     pub receiver: WebGLReceiver<WebGLMsg>,
-    pub surface_backed_framebuffers:
-        Arc<RwLock<FnvHashMap<WebGLSurfaceBackedFramebufferId, WebGLSurfaceBackedFramebuffer>>>,
     pub adapter: Adapter,
 }
 
@@ -148,7 +147,6 @@ impl WebGLThread {
             external_images,
             sender,
             receiver,
-	    surface_backed_framebuffers,
             adapter,
         }: WebGLThreadInit,
     ) -> Self {
@@ -163,7 +161,8 @@ impl WebGLThread {
             external_images,
             sender,
             receiver,
-	    surface_backed_framebuffers,
+	    front_buffers: FrontBuffers::new(),
+	    back_buffers: BackBuffers::new(),
         }
     }
 
@@ -372,6 +371,9 @@ impl WebGLThread {
             WebGLContextInfo { image_key: None, received_webgl_command: false },
         );
 
+        self.front_buffers.create_webgl_context(id);
+        self.back_buffers.create_webgl_context(id);
+
         Ok((id, limits))
     }
 
@@ -391,12 +393,12 @@ impl WebGLThread {
         // Throw out all buffers.
         let context_descriptor = self.device.context_descriptor(&data.ctx);
         let new_surface = self.device.create_surface(&data.ctx, &size.to_i32()).unwrap();
-        drop(self.device.replace_context_surface(&mut data.ctx, new_surface).unwrap());
-        let new_surface = self.device.create_surface(&data.ctx, &size.to_i32()).unwrap();
-        drop(self.device.replace_context_surface(&mut data.ctx, new_surface).unwrap());
-
-        let framebuffer = self.device.context_surface_framebuffer_object(&data.ctx).unwrap();
-        data.gl.bind_framebuffer(gl::FRAMEBUFFER, framebuffer);
+	if let Some(surface) = self.back_buffers.replace_context_surface(&mut self.device, &data.ctx, context_id, new_surface) {
+	    self.device.destroy_surface(surface).unwrap();
+	}
+	if let Some(surface) = self.front_buffers.take(buffer_id) {
+	    self.device.destroy_surface(surface).unwrap();
+	}
 
         // Update WR image if needed. Resize image updates are only required for SharedTexture mode.
         // Readback mode already updates the image every frame to send the raw pixels.
@@ -433,16 +435,39 @@ impl WebGLThread {
         }
 
         // We need to make the context current so its resources can be disposed of.
-        drop(Self::make_current_if_needed(&self.device,
+        let data = Self::make_current_if_needed(&self.device,
                                           context_id,
                                           &self.contexts,
-                                          &mut self.bound_context_id));
+                                          &mut self.bound_context_id);
 
         // Release GL context.
         self.contexts.remove(&context_id);
 
         // Removing a GLContext may make the current bound context_id dirty.
         self.bound_context_id = None;
+
+        // Remove the opaque framebuffer's surfaces from the front and back buffers
+	for framebuffer_id in data.opaque_framebuffer_ids {
+  	    let buffer_id = DoubleBufferId::Opaque(framebuffer_id);
+   	    if let Some(surface) = self.front_buffers.remove(buffer_id) {
+	        self.device_destroy_surface(&mut data.ctx, surface).unwrap();
+	    }
+    	    if let BackBuffer::Unattached(surface) = self.back_buffers.remove(buffer_id) {
+	        self.device_destroy_surface(&mut data.ctx, surface).unwrap();
+	    }
+	}
+
+        // Remove the context's surfaces from the front and back buffers
+	let buffer_id = DoubleBufferId::Default(context_id);
+	if let Some(surface) = self.front_buffers.remove(buffer_id) {
+	    self.device_destroy_surface(&mut data.ctx, surface).unwrap();
+	}
+	if let BackBuffer::Unattached(surface) = self.back_buffers.remove(buffer_id) {
+	    self.device_destroy_surface(&mut data.ctx, surface).unwrap();
+	}
+
+        // Destroy the context
+        self.device_destroy_contex(data.ctx).unwrap();
     }
 
     /// Handles the creation/update of webrender_api::ImageKeys for a specific WebGLContext.
@@ -464,8 +489,8 @@ impl WebGLThread {
             &mut self.contexts,
             &mut self.bound_context_id).expect("Where's the GL data?");
 
-        let size = self.device
-                       .context_surface_size(&data.ctx)
+        let size = self.back_buffers
+                       .context_surface_size(&data.ctx, context_id)
                        .expect("Where's the front surface?");
         let descriptor = self.device.context_descriptor(&data.ctx);
         let has_alpha = self.device
@@ -988,7 +1013,7 @@ impl WebGLImpl {
             },
             WebGLCommand::CreateBuffer(ref chan) => Self::create_buffer(gl, chan),
             WebGLCommand::CreateFramebuffer(ref chan) => Self::create_framebuffer(gl, chan),
-            WebGLCommand::CreateOpaqueFramebuffer(size, ref chan) => unimplemented!(),
+            WebGLCommand::CreateOpaqueFramebuffer(size, ref chan) => Self::create_opaque_framebuffer(gl, size, chan),
             WebGLCommand::CreateRenderbuffer(ref chan) => Self::create_renderbuffer(gl, chan),
             WebGLCommand::CreateTexture(ref chan) => Self::create_texture(gl, chan),
             WebGLCommand::CreateProgram(ref chan) => Self::create_program(gl, chan),
@@ -1666,6 +1691,16 @@ impl WebGLImpl {
             Some(unsafe { WebGLFramebufferId::new(framebuffer) })
         };
         chan.send(framebuffer).unwrap();
+    }
+
+    #[allow(unsafe_code)]
+    fn create_opaque_framebuffer(gl: &dyn gl::Gl, size: Size2D<i32>) -> Option<WebGLOpaqueFramebufferId> {
+       let surface = device.create_surface(context, &size).ok()?;
+       let framebuffer_id = WebGLOpaqueFramebufferId::from(surface.id());
+       let buffer_id = DoubleBufferId::Opaque(framebuffer_id);
+       self.back_buffers.insert(buffer_id);
+       self.front_buffers.insert(buffer_id);
+       chan.send(framebuffer_id).unwrap();
     }
 
     #[allow(unsafe_code)]

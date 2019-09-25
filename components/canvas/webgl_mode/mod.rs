@@ -3,7 +3,6 @@
  * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 
 mod inprocess;
+mod buffers;
 pub use self::inprocess::WebGLComm;
 pub use self::inprocess::WebGLExternalImages;
-pub(crate) use self::inprocess::WebGLSurfaceBackedFramebuffer;
-pub(crate) use self::inprocess::WebGLSurfaceBackedFramebufferId;
