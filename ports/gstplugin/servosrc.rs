@@ -72,6 +72,7 @@ use surfman::SurfaceType;
 use surfman_chains::SwapChain;
 
 use std::cell::RefCell;
+use std::convert::TryFrom;
 use std::rc::Rc;
 use std::sync::Mutex;
 use std::thread;
@@ -113,13 +114,12 @@ impl ServoSrcGfx {
 
         device.make_context_current(&context).unwrap();
 
-        let size = Size2D::new(512, 512);
-        let surface_type = SurfaceType::Generic { size };
+        let surface_type = SurfaceType::Generic { size: DEFAULT_SIZE.to_untyped() };
         let surface = device
             .create_surface(&mut context, SurfaceAccess::GPUCPU, &surface_type)
             .expect("Failed to create surface");
 
-        gl.viewport(0, 0, size.width, size.height);
+        gl.viewport(0, 0, DEFAULT_SIZE.width, DEFAULT_SIZE.height);
         debug_assert_eq!(gl.get_error(), gl::NO_ERROR);
 
         device
@@ -170,6 +170,12 @@ enum ServoSrcMsg {
 const DEFAULT_URL: &'static str =
     "https://rawcdn.githack.com/mrdoob/three.js/r105/examples/webgl_animation_cloth.html";
 
+const MIN_SIZE: Size2D<i32, DevicePixel> = Size2D::new(512, 512);
+const DEFAULT_SIZE: Size2D<i32, DevicePixel> = Size2D::new(512, 512);
+const MAX_SIZE: Size2D<i32, DevicePixel> = Size2D::new(2048, 2048);
+const MIN_FPS: i32 = 1;
+const MAX_FPS: i32 = 15;
+
 struct ServoThread {
     receiver: Receiver<ServoSrcMsg>,
     swap_chain: SwapChain,
@@ -192,13 +198,13 @@ impl ServoThread {
     fn run(&mut self) {
         self.new_browser();
         while let Ok(msg) = self.receiver.recv() {
-            debug!("Servo thread handling message {:?}", msg);
+            info!("Servo thread handling message {:?}", msg);
             match msg {
                 ServoSrcMsg::GetSwapChain(sender) => sender
                     .send(self.swap_chain.clone())
                     .expect("Failed to send swap chain"),
                 ServoSrcMsg::Resize(size) => self.resize(size),
-                ServoSrcMsg::Heartbeat => self.servo.handle_events(vec![]),
+                ServoSrcMsg::Heartbeat => self.servo.handle_events(vec![WindowEvent::Resize]),
                 ServoSrcMsg::Quit => break,
             }
         }
@@ -425,11 +431,11 @@ impl ObjectSubclass for ServoSrc {
             "video/x-raw",
             &[
                 ("format", &VideoFormat::Bgrx.to_string()),
-                ("width", &IntRange::<i32>::new(512, 1024)),
-                ("height", &IntRange::<i32>::new(512, 1024)),
+                ("width", &IntRange::<i32>::new(MIN_SIZE.width, MAX_SIZE.width)),
+                ("height", &IntRange::<i32>::new(MIN_SIZE.height, MAX_SIZE.height)),
                 (
                     "framerate",
-                    &FractionRange::new(Fraction::new(1, 1), Fraction::new(15, 1)),
+                    &FractionRange::new(Fraction::new(MIN_FPS, 1), Fraction::new(MAX_FPS, 1)),
                 ),
             ],
         );
@@ -458,7 +464,7 @@ impl BaseSrcImpl for ServoSrc {
     fn set_caps(&self, _src: &BaseSrc, outcaps: &Caps) -> Result<(), LoggableError> {
         let info = VideoInfo::from_caps(outcaps)
             .ok_or_else(|| gst_loggable_error!(CATEGORY, "Failed to get video info"))?;
-        let size = Size2D::new(info.height(), info.width()).to_i32();
+        let size = Size2D::new(info.width(), info.height()).to_i32();
         debug!("Setting servosrc buffer size to {}", size,);
         self.sender
             .send(ServoSrcMsg::Resize(size))
@@ -476,6 +482,10 @@ impl BaseSrcImpl for ServoSrc {
         info!("Starting");
         let _ = self.sender.send(ServoSrcMsg::Quit);
         Ok(())
+    }
+
+    fn get_size(&self, _src: &BaseSrc) -> Option<u64> {
+        u64::try_from(self.info.lock().ok()?.as_ref()?.size()).ok()
     }
 
     fn fill(
@@ -504,7 +514,7 @@ impl BaseSrcImpl for ServoSrc {
         let height = frame.height() as i32;
         let width = frame.width() as i32;
         let format = frame.format();
-        debug!(
+        info!(
             "Filling servosrc buffer {}x{} {:?} {:?}",
             width, height, format, frame,
         );
@@ -514,6 +524,8 @@ impl BaseSrcImpl for ServoSrc {
             let mut gfx = gfx.borrow_mut();
             let gfx = &mut *gfx;
             if let Some(surface) = self.swap_chain.take_surface() {
+	        info!("Filling with surface of size {:?}", gfx.device.surface_info(&surface).size);
+
                 gfx.device.make_context_current(&gfx.context).unwrap();
                 debug_assert_eq!(gfx.gl.get_error(), gl::NO_ERROR);
 

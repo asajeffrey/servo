@@ -689,9 +689,9 @@ impl<Window: WindowMethods + ?Sized> IOCompositor<Window> {
             self.update_zoom_transform();
         }
 
-        if self.embedder_coordinates.viewport == old_coords.viewport {
-            return;
-        }
+//        if self.embedder_coordinates.viewport == old_coords.viewport {
+//            return;
+//        }
 
         self.send_window_size(WindowSizeType::Resize);
         self.composite_if_necessary(CompositingReason::Resize);
