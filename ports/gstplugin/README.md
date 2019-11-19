@@ -20,6 +20,7 @@ To run:
 ```
 GST_PLUGIN_PATH=target/gstplugins \
   gst-launch-1.0 servosrc \
+    ! video/x-raw,width=512,height=256,framerate=25/1 \
     ! queue \
     ! videoflip video-direction=vert \
     ! autovideosink
