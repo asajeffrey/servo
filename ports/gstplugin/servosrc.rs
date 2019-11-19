@@ -140,6 +140,8 @@ impl ServoSrcGfx {
         let fbo = gl.gen_framebuffers(1)[0];
         debug_assert_eq!(gl.get_error(), gl::NO_ERROR);
 
+        device.make_no_context_current().unwrap();
+
         Self {
             device,
             context,
@@ -425,11 +427,14 @@ impl ObjectSubclass for ServoSrc {
             "video/x-raw",
             &[
                 ("format", &VideoFormat::Bgrx.to_string()),
-                ("width", &IntRange::<i32>::new(512, 1024)),
-                ("height", &IntRange::<i32>::new(512, 1024)),
+                ("width", &IntRange::<i32>::new(1, std::i32::MAX)),
+                ("height", &IntRange::<i32>::new(1, std::i32::MAX)),
                 (
                     "framerate",
-                    &FractionRange::new(Fraction::new(1, 1), Fraction::new(15, 1)),
+                    &FractionRange::new(
+                        Fraction::new(1, std::i32::MAX),
+                        Fraction::new(std::i32::MAX, 1),
+                    ),
                 ),
             ],
         );
