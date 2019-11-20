@@ -61,6 +61,9 @@ use servo::webrender_api::units::DevicePixel;
 use servo::Servo;
 
 use sparkle::gl;
+use sparkle::gl::types::GLenum;
+use sparkle::gl::types::GLint;
+use sparkle::gl::types::GLsizei;
 use sparkle::gl::types::GLuint;
 use sparkle::gl::Gl;
 
@@ -70,8 +73,11 @@ use surfman::SurfaceAccess;
 use surfman::SurfaceType;
 
 use surfman_chains::SwapChain;
+use surfman_chains_api::SwapChainAPI;
 
 use std::cell::RefCell;
+use std::mem;
+use std::ptr;
 use std::rc::Rc;
 use std::sync::Mutex;
 use std::thread;
@@ -86,13 +92,17 @@ struct ServoSrcGfx {
     device: Device,
     context: Context,
     gl: Rc<Gl>,
-    fbo: GLuint,
+    read_fbo: GLuint,
+    draw_fbo: GLuint,
+    draw_texture: GLuint,
+    draw_size: Size2D<i32, DevicePixel>,
+    draw_target: GLuint,
 }
 
 impl ServoSrcGfx {
     fn new() -> ServoSrcGfx {
         let version = surfman::GLVersion { major: 4, minor: 3 };
-        let flags = surfman::ContextAttributeFlags::empty();
+        let flags = surfman::ContextAttributeFlags::ALPHA;
         let attributes = surfman::ContextAttributes { version, flags };
 
         let connection = surfman::Connection::new().expect("Failed to create connection");
@@ -118,18 +128,43 @@ impl ServoSrcGfx {
         let surface = device
             .create_surface(&mut context, SurfaceAccess::GPUCPU, &surface_type)
             .expect("Failed to create surface");
-
-        gl.viewport(0, 0, size.width, size.height);
         device
             .bind_surface_to_context(&mut context, surface)
             .expect("Failed to bind surface");
-        let fbo = device
-            .context_surface_info(&context)
-            .expect("Failed to get context info")
-            .expect("Failed to get context info")
-            .framebuffer_object;
-        gl.bind_framebuffer(gl::FRAMEBUFFER, fbo);
-        let fbo = gl.gen_framebuffers(1)[0];
+
+        let read_fbo = gl.gen_framebuffers(1)[0];
+        let draw_fbo = gl.gen_framebuffers(1)[0];
+        let draw_texture = gl.gen_textures(1)[0];
+        let draw_size = Size2D::from_untyped(size);
+        let draw_target = device.surface_gl_texture_target();
+
+        gl.bind_texture(draw_target, draw_texture);
+        debug_assert_eq!(gl.get_error(), gl::NO_ERROR);
+
+        gl.tex_image_2d(
+            draw_target,
+            0,
+            gl::RGBA as i32,
+            draw_size.width,
+            draw_size.height,
+            0,
+            gl::RGBA,
+            gl::UNSIGNED_BYTE,
+            None,
+        );
+        debug_assert_eq!(gl.get_error(), gl::NO_ERROR);
+
+        gl.bind_framebuffer(gl::DRAW_FRAMEBUFFER, draw_fbo);
+        debug_assert_eq!(gl.get_error(), gl::NO_ERROR);
+
+        gl.framebuffer_texture_2d(
+            gl::DRAW_FRAMEBUFFER,
+            gl::COLOR_ATTACHMENT0,
+            draw_target,
+            draw_texture,
+            0,
+        );
+        debug_assert_eq!(gl.get_error(), gl::NO_ERROR);
         debug_assert_eq!(
             (gl.check_framebuffer_status(gl::FRAMEBUFFER), gl.get_error()),
             (gl::FRAMEBUFFER_COMPLETE, gl::NO_ERROR)
@@ -141,7 +176,11 @@ impl ServoSrcGfx {
             device,
             context,
             gl,
-            fbo,
+            read_fbo,
+            draw_fbo,
+            draw_texture,
+            draw_target,
+            draw_size,
         }
     }
 }
@@ -222,7 +261,12 @@ impl ServoThread {
                 (gl::FRAMEBUFFER_COMPLETE, gl::NO_ERROR)
             );
             self.swap_chain
-                .resize(&mut gfx.device, &mut gfx.context, size.to_untyped())
+                .resize_TMP(
+                    &mut gfx.device,
+                    &mut gfx.context,
+                    size.to_untyped(),
+                    &mut gfx.gl,
+                )
                 .expect("Failed to resize");
             let _ = gfx.device.make_context_current(&mut gfx.context);
             debug_assert_eq!(
@@ -543,72 +587,205 @@ impl BaseSrcImpl for ServoSrc {
             );
             FlowError::Error
         })?;
-        let height = frame.height() as i32;
-        let width = frame.width() as i32;
-        let format = frame.format();
-        debug!(
-            "Filling servosrc buffer {}x{} {:?} {:?}",
-            width, height, format, frame,
-        );
+        let frame_size = Size2D::new(frame.height(), frame.width()).to_i32();
         let data = frame.plane_data_mut(0).unwrap();
 
         GFX.with(|gfx| {
             let mut gfx = gfx.borrow_mut();
             let gfx = &mut *gfx;
-            if let Some(surface) = self.swap_chain.take_surface() {
-                gfx.device.make_context_current(&gfx.context).unwrap();
-                debug_assert_eq!(gfx.gl.get_error(), gl::NO_ERROR);
-                debug_assert_eq!(
-                    gfx.gl.check_framebuffer_status(gl::FRAMEBUFFER),
-                    gl::FRAMEBUFFER_COMPLETE
-                );
 
-                gfx.gl.viewport(0, 0, width, height);
+            if let Some(surface) = self.swap_chain.take_surface() {
+                gfx.device.make_context_current(&mut gfx.context);
                 debug_assert_eq!(gfx.gl.get_error(), gl::NO_ERROR);
+
+                let surface_size = gfx.device.surface_info(&surface).size;
 
                 let surface_texture = gfx
                     .device
                     .create_surface_texture(&mut gfx.context, surface)
                     .unwrap();
-                let texture_id = surface_texture.gl_texture();
+                let texture = surface_texture.gl_texture();
+                /*
+                gfx.gl.bind_texture(gfx.device.surface_gl_texture_target(), texture);
+                                    debug_assert_eq!(
+                                        (
+                                            gfx.gl.check_framebuffer_status(gl::FRAMEBUFFER),
+                                            gfx.gl.get_error()
+                                        ),
+                                        (gl::FRAMEBUFFER_COMPLETE, gl::NO_ERROR)
+                                    );
+                if let Gl::Gl(ref gl) = *gfx.gl {
+                unsafe { gl.GetTexImage(gfx.device.surface_gl_texture_target(), 0, gl::RGBA, gl::UNSIGNED_BYTE, data.as_mut_ptr() as _) ;}
+                } else {
+                panic!("EGL???");
+                }
+                                    debug_assert_eq!(
+                                        (
+                                            gfx.gl.check_framebuffer_status(gl::FRAMEBUFFER),
+                                            gfx.gl.get_error()
+                                        ),
+                                        (gl::FRAMEBUFFER_COMPLETE, gl::NO_ERROR)
+                                    );
+                */
 
-                gfx.gl.bind_framebuffer(gl::FRAMEBUFFER, gfx.fbo);
-                debug_assert_eq!(gfx.gl.get_error(), gl::NO_ERROR);
+                // gfx.gl.bind_framebuffer(gl::DRAW_FRAMEBUFFER, gfx.draw_fbo);
+                let draw_fbo = gfx
+                    .device
+                    .context_surface_info(&gfx.context)
+                    .unwrap()
+                    .unwrap()
+                    .framebuffer_object;
+                // let draw_fbo = gfx.draw_fbo;
+                gfx.gl.bind_framebuffer(gl::DRAW_FRAMEBUFFER, draw_fbo);
+                gfx.gl.bind_framebuffer(gl::READ_FRAMEBUFFER, gfx.read_fbo);
+                debug_assert_eq!(
+                    (
+                        gfx.gl.check_framebuffer_status(gl::FRAMEBUFFER),
+                        gfx.gl.get_error()
+                    ),
+                    (gl::FRAMEBUFFER_COMPLETE, gl::NO_ERROR)
+                );
 
+                if frame_size != gfx.draw_size {
+                    panic!("Not there yet");
+                    gfx.gl.bind_texture(gfx.draw_target, gfx.draw_texture);
+                    debug_assert_eq!(
+                        (
+                            gfx.gl.check_framebuffer_status(gl::FRAMEBUFFER),
+                            gfx.gl.get_error()
+                        ),
+                        (gl::FRAMEBUFFER_COMPLETE, gl::NO_ERROR)
+                    );
+
+                    gfx.gl.tex_image_2d(
+                        gfx.draw_target,
+                        0,
+                        gl::RGBA as i32,
+                        frame_size.width,
+                        frame_size.height,
+                        0,
+                        gl::RGBA,
+                        gl::UNSIGNED_BYTE,
+                        None,
+                    );
+                    debug_assert_eq!(
+                        (
+                            gfx.gl.check_framebuffer_status(gl::FRAMEBUFFER),
+                            gfx.gl.get_error()
+                        ),
+                        (gl::FRAMEBUFFER_COMPLETE, gl::NO_ERROR)
+                    );
+                    gfx.draw_size = frame_size;
+                }
+
+                debug_assert_eq!(
+                    (
+                        gfx.gl.check_framebuffer_status(gl::FRAMEBUFFER),
+                        gfx.gl.get_error()
+                    ),
+                    (gl::FRAMEBUFFER_COMPLETE, gl::NO_ERROR)
+                );
+                /*
+                                gfx.gl.framebuffer_texture_2d(
+                                    gl::DRAW_FRAMEBUFFER,
+                                    gl::COLOR_ATTACHMENT0,
+                                    gfx.draw_target,
+                                    gfx.draw_texture,
+                                    0,
+                                );
+                                debug_assert_eq!(
+                                    (
+                                        gfx.gl.check_framebuffer_status(gl::FRAMEBUFFER),
+                                        gfx.gl.get_error()
+                                    ),
+                                    (gl::FRAMEBUFFER_COMPLETE, gl::NO_ERROR)
+                                );
+                */
                 gfx.gl.framebuffer_texture_2d(
-                    gl::FRAMEBUFFER,
+                    gl::READ_FRAMEBUFFER,
                     gl::COLOR_ATTACHMENT0,
                     gfx.device.surface_gl_texture_target(),
-                    texture_id,
+                    texture,
                     0,
                 );
-                debug_assert_eq!(gfx.gl.get_error(), gl::NO_ERROR);
+                debug_assert_eq!(
+                    (
+                        gfx.gl.check_framebuffer_status(gl::FRAMEBUFFER),
+                        gfx.gl.get_error()
+                    ),
+                    (gl::FRAMEBUFFER_COMPLETE, gl::NO_ERROR)
+                );
+
+                gfx.gl.clear_color(0.2, 0.3, 0.3, 1.0);
+                gfx.gl.clear(gl::COLOR_BUFFER_BIT);
+                debug_assert_eq!(
+                    (
+                        gfx.gl.check_framebuffer_status(gl::FRAMEBUFFER),
+                        gfx.gl.get_error()
+                    ),
+                    (gl::FRAMEBUFFER_COMPLETE, gl::NO_ERROR)
+                );
+
+                gfx.gl.blit_framebuffer(
+                    0,
+                    0,
+                    surface_size.width,
+                    surface_size.height,
+                    0,
+                    0,
+                    frame_size.width,
+                    frame_size.height,
+                    gl::COLOR_BUFFER_BIT,
+                    gl::NEAREST,
+                );
+                debug_assert_eq!(
+                    (
+                        gfx.gl.check_framebuffer_status(gl::FRAMEBUFFER),
+                        gfx.gl.get_error()
+                    ),
+                    (gl::FRAMEBUFFER_COMPLETE, gl::NO_ERROR)
+                );
+
+                gfx.gl.bind_framebuffer(gl::READ_FRAMEBUFFER, draw_fbo);
+                debug_assert_eq!(
+                    (
+                        gfx.gl.check_framebuffer_status(gl::FRAMEBUFFER),
+                        gfx.gl.get_error()
+                    ),
+                    (gl::FRAMEBUFFER_COMPLETE, gl::NO_ERROR)
+                );
 
                 // TODO: use GL memory to avoid readback
                 gfx.gl.read_pixels_into_buffer(
                     0,
                     0,
-                    width,
-                    height,
+                    frame_size.width,
+                    frame_size.height,
                     gl::BGRA,
                     gl::UNSIGNED_BYTE,
                     data,
                 );
-                debug_assert_eq!(gfx.gl.get_error(), gl::NO_ERROR);
-                debug!("Read pixels {:?}", &data[..127]);
+                debug_assert_eq!(
+                    (
+                        gfx.gl.check_framebuffer_status(gl::FRAMEBUFFER),
+                        gfx.gl.get_error()
+                    ),
+                    (gl::FRAMEBUFFER_COMPLETE, gl::NO_ERROR)
+                );
 
-                gfx.device.make_no_context_current().unwrap();
+                debug!("Read pixels {:?}", &data[..127]);
 
                 let surface = gfx
                     .device
                     .destroy_surface_texture(&mut gfx.context, surface_texture)
                     .unwrap();
                 self.swap_chain.recycle_surface(surface);
-
-                debug_assert_eq!(gfx.gl.get_error(), gl::NO_ERROR);
                 debug_assert_eq!(
-                    gfx.gl.check_framebuffer_status(gl::FRAMEBUFFER),
-                    gl::FRAMEBUFFER_COMPLETE
+                    (
+                        gfx.gl.check_framebuffer_status(gl::FRAMEBUFFER),
+                        gfx.gl.get_error()
+                    ),
+                    (gl::FRAMEBUFFER_COMPLETE, gl::NO_ERROR)
                 );
                 gfx.device.make_no_context_current().unwrap();
             }
