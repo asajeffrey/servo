@@ -60,7 +60,6 @@ use gstreamer_gl_sys::gst_gl_context_thread_add;
 use gstreamer_gl_sys::gst_gl_context_get_gl_context;
 use gstreamer_gl_sys::gst_gl_texture_target_to_gl;
 use gstreamer_gl_sys::gst_is_gl_memory;
-use gstreamer_gl_sys::GstGLContext;
 use gstreamer_gl_sys::GstGLMemory;
 use gstreamer_video::VideoInfo;
 
@@ -83,12 +82,22 @@ use sparkle::gl::types::GLuint;
 use sparkle::gl::Gl;
 
 use surfman::device::Device as DeviceAPI;
-use surfman::Context;
-use surfman::Device;
+use surfman::ContextAttributeFlags;
+use surfman::ContextAttributes;
+use surfman::GLVersion;
 use surfman::SurfaceAccess;
 use surfman::SurfaceType;
 use surfman_chains::SwapChain;
 use surfman_chains_api::SwapChainAPI;
+
+// For the moment, we only support wayland and cgl.
+#[cfg(target_os = "macos")]
+use surfman::platform::macos::cgl::device::Device;
+#[cfg(all(unix, not(target_os = "macos")))]
+use surfman::platform::unix::wayland::device::Device;
+
+type Context = <Device as DeviceAPI>::Context;
+type Connection = <Device as DeviceAPI>::Connection;
 
 use std::cell::RefCell;
 use std::collections::HashMap;
@@ -260,11 +269,11 @@ struct ServoWebSrcWindow {
 
 impl ServoWebSrcWindow {
     fn new() -> Self {
-        let version = surfman::GLVersion { major: 4, minor: 3 };
-        let flags = surfman::ContextAttributeFlags::empty();
-        let attributes = surfman::ContextAttributes { version, flags };
+        let version = GLVersion { major: 3, minor: 0 };
+        let flags = ContextAttributeFlags::empty();
+        let attributes = ContextAttributes { version, flags };
 
-        let connection = surfman::Connection::new().expect("Failed to create connection");
+        let connection = Connection::new().expect("Failed to create connection");
         let adapter = connection
             .create_adapter()
             .expect("Failed to create adapter");
@@ -708,8 +717,7 @@ impl ServoWebSrc {
             let mut gfx_cache = gfx_cache.borrow_mut();
             let gfx = gfx_cache.entry(gl_context.clone()).or_insert_with(|| {
                 debug!("Bootstrapping surfman");
-                let connection =
-                    surfman::Connection::new().expect("Failed to bootstrap connection");
+                let connection = Connection::new().expect("Failed to bootstrap connection");
                 let adapter = connection
                     .create_adapter()
                     .expect("Failed to bootstrap adapter");
@@ -717,9 +725,7 @@ impl ServoWebSrc {
                     .create_device(&adapter)
                     .expect("Failed to bootstrap device");
                 let context = unsafe {
-                    let gst_gl_context = gl_context.to_glib_none();
-                    let native_context =
-                        device.native_context_from_gst_gl_context(gst_gl_context.0);
+                    let native_context = device.native_context_from_gl_context(&gl_context);
                     device
                         .create_context_from_native_context(native_context)
                         .expect("Failed to bootstrap surfman context")
@@ -865,21 +871,37 @@ impl ServoWebSrc {
 }
 
 // We need to convert between GStreamer's GL contexts and surfman's.
-trait NativeContextFromGstGLContext: DeviceAPI {
-    unsafe fn native_context_from_gst_gl_context(
-        &self,
-        context: *mut GstGLContext,
-    ) -> Self::NativeContext;
+trait NativeContextFromGLContext: DeviceAPI {
+    fn native_context_from_gl_context(&self, gl_context: &GLContext) -> Self::NativeContext;
 }
 
 #[cfg(target_os = "macos")]
-impl NativeContextFromGstGLContext for surfman::platform::macos::cgl::device::Device {
-    unsafe fn native_context_from_gst_gl_context(
+impl NativeContextFromGLContext for surfman::platform::macos::cgl::device::Device {
+    fn native_context_from_gl_context(
         &self,
-        context: *mut GstGLContext,
+        gl_context: &GLContext,
     ) -> surfman::platform::macos::cgl::context::NativeContext {
-        let cgl_context = std::mem::transmute(gst_gl_context_get_gl_context(context));
+        let gst_gl_context = gl_context.to_glib_none();
+        let cgl_context =
+            unsafe { std::mem::transmute(gst_gl_context_get_gl_context(gst_gl_context.0)) };
         surfman::platform::macos::cgl::context::NativeContext(cgl_context)
+    }
+}
+
+#[cfg(all(unix, not(target_os = "macos")))]
+impl NativeContextFromGLContext for surfman::platform::unix::wayland::device::Device {
+    fn native_context_from_gl_context(
+        &self,
+        gl_context: &GLContext,
+    ) -> surfman::platform::unix::wayland::context::NativeContext {
+        let gst_gl_context = gl_context.to_glib_none();
+        let egl_context =
+            unsafe { std::mem::transmute(gst_gl_context_get_gl_context(gst_gl_context.0)) };
+        surfman::platform::unix::wayland::context::NativeContext {
+            egl_context,
+            egl_draw_surface: std::ptr::null(),
+            egl_read_surface: std::ptr::null(),
+        }
     }
 }
 
