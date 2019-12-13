@@ -25,6 +25,7 @@ use glib::subclass::object::Property;
 use glib::subclass::simple::ClassStruct;
 use glib::subclass::types::ObjectSubclass;
 use glib::translate::FromGlibPtrBorrow;
+use glib::translate::ToGlibPtr;
 use glib::value::Value;
 use glib::ParamSpec;
 use gstreamer::gst_element_error;
@@ -56,6 +57,7 @@ use gstreamer_gl::GLContext;
 use gstreamer_gl::GLContextExt;
 use gstreamer_gl::GLContextExtManual;
 use gstreamer_gl_sys::gst_gl_context_thread_add;
+use gstreamer_gl_sys::gst_gl_context_get_gl_context;
 use gstreamer_gl_sys::gst_gl_texture_target_to_gl;
 use gstreamer_gl_sys::gst_is_gl_memory;
 use gstreamer_gl_sys::GstGLContext;
@@ -80,11 +82,11 @@ use sparkle::gl;
 use sparkle::gl::types::GLuint;
 use sparkle::gl::Gl;
 
-use surfman::platform::generic::universal::context::Context;
-use surfman::platform::generic::universal::device::Device;
+use surfman::device::Device as DeviceAPI;
+use surfman::Context;
+use surfman::Device;
 use surfman::SurfaceAccess;
 use surfman::SurfaceType;
-
 use surfman_chains::SwapChain;
 use surfman_chains_api::SwapChainAPI;
 
@@ -102,7 +104,7 @@ use std::time::Instant;
 
 pub struct ServoWebSrc {
     sender: Sender<ServoWebSrcMsg>,
-    swap_chain: SwapChain,
+    swap_chain: SwapChain<Device>,
     url: Mutex<Option<String>>,
     info: Mutex<Option<VideoInfo>>,
     buffer_pool: Mutex<Option<BufferPool>>,
@@ -138,7 +140,7 @@ thread_local! {
 #[derive(Debug)]
 enum ServoWebSrcMsg {
     Start(ServoUrl),
-    GetSwapChain(Sender<SwapChain>),
+    GetSwapChain(Sender<SwapChain<Device>>),
     Resize(Size2D<i32, DevicePixel>),
     Heartbeat,
     Stop,
@@ -152,7 +154,7 @@ const DEFAULT_FRAME_DURATION: Duration = Duration::from_micros(16_667);
 
 struct ServoThread {
     receiver: Receiver<ServoWebSrcMsg>,
-    swap_chain: SwapChain,
+    swap_chain: SwapChain<Device>,
     gfx: Rc<RefCell<ServoWebSrcGfx>>,
     servo: Servo<ServoWebSrcWindow>,
 }
@@ -251,7 +253,7 @@ impl EventLoopWaker for ServoWebSrcEmbedder {
 }
 
 struct ServoWebSrcWindow {
-    swap_chain: SwapChain,
+    swap_chain: SwapChain<Device>,
     gfx: Rc<RefCell<ServoWebSrcGfx>>,
     gl: Rc<dyn gleam::gl::Gl>,
 }
@@ -263,25 +265,18 @@ impl ServoWebSrcWindow {
         let attributes = surfman::ContextAttributes { version, flags };
 
         let connection = surfman::Connection::new().expect("Failed to create connection");
-        let adapter = surfman::Adapter::default().expect("Failed to create adapter");
-        let mut device =
-            surfman::Device::new(&connection, &adapter).expect("Failed to create device");
+        let adapter = connection
+            .create_adapter()
+            .expect("Failed to create adapter");
+        let mut device = connection
+            .create_device(&adapter)
+            .expect("Failed to create device");
         let descriptor = device
             .create_context_descriptor(&attributes)
             .expect("Failed to create descriptor");
-        let context = device
+        let mut context = device
             .create_context(&descriptor)
             .expect("Failed to create context");
-
-        // This is a workaround for surfman having a different bootstrap API with Angle
-        #[cfg(target_os = "windows")]
-        let mut device = device;
-        #[cfg(not(target_os = "windows"))]
-        let mut device = Device::Hardware(device);
-        #[cfg(target_os = "windows")]
-        let mut context = context;
-        #[cfg(not(target_os = "windows"))]
-        let mut context = Context::Hardware(context);
 
         let gleam =
             unsafe { gleam::gl::GlFns::load_with(|s| device.get_proc_address(&context, s)) };
@@ -297,7 +292,7 @@ impl ServoWebSrcWindow {
         let size = Size2D::new(512, 512);
         let surface_type = SurfaceType::Generic { size };
         let surface = device
-            .create_surface(&mut context, access, &surface_type)
+            .create_surface(&mut context, access, surface_type)
             .expect("Failed to create surface");
 
         device
@@ -713,15 +708,24 @@ impl ServoWebSrc {
             let mut gfx_cache = gfx_cache.borrow_mut();
             let gfx = gfx_cache.entry(gl_context.clone()).or_insert_with(|| {
                 debug!("Bootstrapping surfman");
-                let (device, context) = unsafe { surfman::Device::from_current_context() }
-                    .expect("Failed to bootstrap surfman");
+                let connection =
+                    surfman::Connection::new().expect("Failed to bootstrap connection");
+                let adapter = connection
+                    .create_adapter()
+                    .expect("Failed to bootstrap adapter");
+                let device = connection
+                    .create_device(&adapter)
+                    .expect("Failed to bootstrap device");
+                let context = unsafe {
+                    let gst_gl_context = gl_context.to_glib_none();
+                    let native_context =
+                        device.native_context_from_gst_gl_context(gst_gl_context.0);
+                    device
+                        .create_context_from_native_context(native_context)
+                        .expect("Failed to bootstrap surfman context")
+                };
 
-                // This is a workaround for surfman having a different bootstrap API with Angle
-                #[cfg(not(target_os = "windows"))]
-                let device = Device::Hardware(device);
-                #[cfg(not(target_os = "windows"))]
-                let context = Context::Hardware(context);
-
+                debug!("Creating GL bindings");
                 let gl = Gl::gl_fns(gl::ffi_gl::Gl::load_with(|s| {
                     gl_context.get_proc_address(s) as *const _
                 }));
@@ -773,7 +777,7 @@ impl ServoWebSrc {
                     .device
                     .create_surface_texture(&mut gfx.context, surface)
                     .unwrap();
-                let read_texture_id = surface_texture.gl_texture();
+                let read_texture_id = gfx.device.surface_texture_object(&surface_texture);
                 let read_texture_target = gfx.device.surface_gl_texture_target();
 
                 gfx.gl.bind_framebuffer(gl::READ_FRAMEBUFFER, gfx.read_fbo);
@@ -859,3 +863,24 @@ impl ServoWebSrc {
         Ok(())
     }
 }
+
+// We need to convert between GStreamer's GL contexts and surfman's.
+trait NativeContextFromGstGLContext: DeviceAPI {
+    unsafe fn native_context_from_gst_gl_context(
+        &self,
+        context: *mut GstGLContext,
+    ) -> Self::NativeContext;
+}
+
+#[cfg(target_os = "macos")]
+impl NativeContextFromGstGLContext for surfman::platform::macos::cgl::device::Device {
+    unsafe fn native_context_from_gst_gl_context(
+        &self,
+        context: *mut GstGLContext,
+    ) -> surfman::platform::macos::cgl::context::NativeContext {
+        let cgl_context = std::mem::transmute(gst_gl_context_get_gl_context(context));
+        surfman::platform::macos::cgl::context::NativeContext(cgl_context)
+    }
+}
+
+// TODO: Implement that trait for more platforms
