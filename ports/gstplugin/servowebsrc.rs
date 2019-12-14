@@ -294,8 +294,8 @@ impl ServoWebSrcWindow {
             .expect("Failed to create context");
 
         let gleam =
-            unsafe { gleam::gl::GlFns::load_with(|s| device.get_proc_address(&context, s)) };
-        let gl = Gl::gl_fns(gl::ffi_gl::Gl::load_with(|s| {
+            unsafe { gleam::gl::GlesFns::load_with(|s| device.get_proc_address(&context, s)) };
+        let gl = Gl::gles_fns(gl::ffi_gles::Gles2::load_with(|s| {
             device.get_proc_address(&context, s)
         }));
 
@@ -744,7 +744,7 @@ impl ServoWebSrc {
                 };
 
                 debug!("Creating GL bindings");
-                let gl = Gl::gl_fns(gl::ffi_gl::Gl::load_with(|s| {
+                let gl = Gl::gles_fns(gl::ffi_gles::Gles2::load_with(|s| {
                     gl_context.get_proc_address(s) as *const _
                 }));
                 let draw_fbo = gl.gen_framebuffers(1)[0];
@@ -794,6 +794,12 @@ impl ServoWebSrc {
                     let _ = self.sender.send(ServoWebSrcMsg::Resize(size));
                 }
 
+                if size.width <= 0 || size.height <= 0 {
+		    info!("Surface is zero-sized");
+                    self.swap_chain.recycle_surface(surface);
+		    return;
+		}
+
                 let surface_texture = gfx
                     .device
                     .create_surface_texture(&mut gfx.context, surface)
@@ -801,8 +807,11 @@ impl ServoWebSrc {
                 let read_texture_id = gfx.device.surface_texture_object(&surface_texture);
                 let read_texture_target = gfx.device.surface_gl_texture_target();
 
-                debug!("Binding GL textures");
-                gfx.gl.bind_framebuffer(gl::READ_FRAMEBUFFER, gfx.read_fbo);
+                debug!(
+                    "Filling with {}/{} {}",
+                    read_texture_id, read_texture_target, surface_size
+                );
+		gfx.gl.bind_framebuffer(gl::READ_FRAMEBUFFER, gfx.read_fbo);
                 gfx.gl.framebuffer_texture_2d(
                     gl::READ_FRAMEBUFFER,
                     gl::COLOR_ATTACHMENT0,
@@ -818,28 +827,18 @@ impl ServoWebSrc {
                     draw_texture_id,
                     0,
                 );
-                debug_assert_eq!(
-                    (
-                        gfx.gl.check_framebuffer_status(gl::FRAMEBUFFER),
-                        gfx.gl.get_error()
-                    ),
-                    (gl::FRAMEBUFFER_COMPLETE, gl::NO_ERROR)
-                );
-
                 gfx.gl.clear_color(0.3, 0.7, 0.3, 1.0);
                 gfx.gl.clear(gl::COLOR_BUFFER_BIT);
                 debug_assert_eq!(
                     (
-                        gfx.gl.check_framebuffer_status(gl::FRAMEBUFFER),
+                        gfx.gl.check_framebuffer_status(gl::READ_FRAMEBUFFER),
+                        gfx.gl.check_framebuffer_status(gl::DRAW_FRAMEBUFFER),
                         gfx.gl.get_error()
                     ),
-                    (gl::FRAMEBUFFER_COMPLETE, gl::NO_ERROR)
+                    (gl::FRAMEBUFFER_COMPLETE, gl::FRAMEBUFFER_COMPLETE, gl::NO_ERROR)
                 );
 
-                debug!(
-                    "Filling with {}/{} {}",
-                    read_texture_id, read_texture_target, surface_size
-                );
+                debug!("Blitting");
                 gfx.gl.blit_framebuffer(
                     0,
                     0,
