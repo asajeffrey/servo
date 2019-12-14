@@ -32,3 +32,7 @@ mio = { git = "https://github.com/servo/mio.git", branch = "servo" }
 winapi = { git = "https://github.com/servo/winapi-rs", branch = "patch-1" }
 spirv_cross = { git = "https://github.com/kvark/spirv_cross", branch = "wgpu" }
 backtrace = { git = "https://github.com/MeFisto94/backtrace-rs", branch = "fix-strtab-freeing-crash" }
+
+[patch."https://github.com/pcwalton/surfman"]
+surfman = { git = "https://github.com/asajeffrey/surfman", branch = "mutli-wayland-connection-supply-egldisplay" }
+

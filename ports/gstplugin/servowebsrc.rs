@@ -57,9 +57,9 @@ use gstreamer_gl::GLContext;
 use gstreamer_gl::GLContextExt;
 use gstreamer_gl::GLContextExtManual;
 use gstreamer_gl_sys::gst_gl_context_thread_add;
-use gstreamer_gl_sys::gst_gl_context_get_gl_context;
 use gstreamer_gl_sys::gst_gl_texture_target_to_gl;
 use gstreamer_gl_sys::gst_is_gl_memory;
+use gstreamer_gl_sys::GstGLContext;
 use gstreamer_gl_sys::GstGLMemory;
 use gstreamer_video::VideoInfo;
 
@@ -81,6 +81,7 @@ use sparkle::gl;
 use sparkle::gl::types::GLuint;
 use sparkle::gl::Gl;
 
+use surfman::connection::Connection as ConnectionAPI;
 use surfman::device::Device as DeviceAPI;
 use surfman::ContextAttributeFlags;
 use surfman::ContextAttributes;
@@ -98,6 +99,8 @@ use surfman::platform::unix::wayland::device::Device;
 
 type Context = <Device as DeviceAPI>::Context;
 type Connection = <Device as DeviceAPI>::Connection;
+type NativeContext = <Device as DeviceAPI>::NativeContext;
+type NativeConnection = <Connection as ConnectionAPI>::NativeConnection;
 
 use std::cell::RefCell;
 use std::collections::HashMap;
@@ -175,6 +178,7 @@ impl ServoThread {
         let swap_chain = window.swap_chain.clone();
         let gfx = window.gfx.clone();
         let servo = Servo::new(embedder, window);
+
         Self {
             receiver,
             swap_chain,
@@ -270,7 +274,9 @@ struct ServoWebSrcWindow {
 impl ServoWebSrcWindow {
     fn new() -> Self {
         let version = GLVersion { major: 3, minor: 0 };
-        let flags = ContextAttributeFlags::empty();
+        let flags = ContextAttributeFlags::DEPTH |
+            ContextAttributeFlags::STENCIL |
+            ContextAttributeFlags::ALPHA;
         let attributes = ContextAttributes { version, flags };
 
         let connection = Connection::new().expect("Failed to create connection");
@@ -297,7 +303,7 @@ impl ServoWebSrcWindow {
             .make_context_current(&mut context)
             .expect("Failed to make context current");
         debug_assert_eq!(gl.get_error(), gl::NO_ERROR);
-        let access = SurfaceAccess::GPUCPU;
+        let access = SurfaceAccess::GPUOnly;
         let size = Size2D::new(512, 512);
         let surface_type = SurfaceType::Generic { size };
         let surface = device
@@ -638,10 +644,12 @@ impl BaseSrcImpl for ServoWebSrc {
 
         // Activate the pool if necessary
         if !pool.is_active() {
+            debug!("Activating the buffer pool");
             pool.set_active(true).map_err(|_| FlowError::Error)?;
         }
 
         // Get a buffer to fill
+        debug!("Acquiring a buffer");
         let buffer = pool.acquire_buffer(None)?;
 
         // Get the GL memory from the buffer
@@ -667,6 +675,7 @@ impl BaseSrcImpl for ServoWebSrc {
             gl_memory,
             result,
         };
+
         let data = &mut task as *mut RunOnGLThread as *mut c_void;
         unsafe { gst_gl_context_thread_add(gl_memory.mem.context, Some(fill_on_gl_thread), data) };
         task.result?;
@@ -717,15 +726,18 @@ impl ServoWebSrc {
             let mut gfx_cache = gfx_cache.borrow_mut();
             let gfx = gfx_cache.entry(gl_context.clone()).or_insert_with(|| {
                 debug!("Bootstrapping surfman");
-                let connection = Connection::new().expect("Failed to bootstrap connection");
+                let native_connection =
+                    unsafe { NativeConnection::from_current_gl_context(&gl_context) };
+                let connection = unsafe { Connection::from_native_connection(native_connection) }
+                    .expect("Failed to bootstrap connection");
                 let adapter = connection
                     .create_adapter()
                     .expect("Failed to bootstrap adapter");
                 let device = connection
                     .create_device(&adapter)
                     .expect("Failed to bootstrap device");
+                let native_context = NativeContext::current();
                 let context = unsafe {
-                    let native_context = device.native_context_from_gl_context(&gl_context);
                     device
                         .create_context_from_native_context(native_context)
                         .expect("Failed to bootstrap surfman context")
@@ -737,6 +749,7 @@ impl ServoWebSrc {
                 }));
                 let draw_fbo = gl.gen_framebuffers(1)[0];
                 let read_fbo = gl.gen_framebuffers(1)[0];
+                debug!("Created GL bindings");
                 ServoWebSrcGfx {
                     device,
                     context,
@@ -749,6 +762,7 @@ impl ServoWebSrc {
             debug_assert_eq!(gfx.gl.get_error(), gl::NO_ERROR);
 
             // Save the current GL state
+            debug!("Saving the GL context");
             let mut bound_fbos = [0, 0];
             unsafe {
                 gfx.gl
@@ -772,6 +786,7 @@ impl ServoWebSrc {
             debug_assert_eq!(gfx.gl.get_error(), gl::NO_ERROR);
 
             if let Some(surface) = self.swap_chain.take_surface() {
+                debug!("Rendering surface");
                 let surface_size = Size2D::from_untyped(gfx.device.surface_info(&surface).size);
                 if size != surface_size {
                     // If we're being asked to fill frames that are a different size than servo is providing,
@@ -786,6 +801,7 @@ impl ServoWebSrc {
                 let read_texture_id = gfx.device.surface_texture_object(&surface_texture);
                 let read_texture_target = gfx.device.surface_gl_texture_target();
 
+                debug!("Binding GL textures");
                 gfx.gl.bind_framebuffer(gl::READ_FRAMEBUFFER, gfx.read_fbo);
                 gfx.gl.framebuffer_texture_2d(
                     gl::READ_FRAMEBUFFER,
@@ -810,7 +826,7 @@ impl ServoWebSrc {
                     (gl::FRAMEBUFFER_COMPLETE, gl::NO_ERROR)
                 );
 
-                gfx.gl.clear_color(0.3, 0.7, 0.3, 0.0);
+                gfx.gl.clear_color(0.3, 0.7, 0.3, 1.0);
                 gfx.gl.clear(gl::COLOR_BUFFER_BIT);
                 debug_assert_eq!(
                     (
@@ -861,47 +877,30 @@ impl ServoWebSrc {
             debug_assert_eq!(gfx.gl.get_error(), gl::NO_ERROR);
         });
 
-        gl_context.activate(false).map_err(|_| {
-            gst_element_error!(src, CoreError::Failed, ["Failed to deactivate GL context"]);
-            FlowError::Error
-        })?;
-
         Ok(())
     }
 }
 
-// We need to convert between GStreamer's GL contexts and surfman's.
-trait NativeContextFromGLContext: DeviceAPI {
-    fn native_context_from_gl_context(&self, gl_context: &GLContext) -> Self::NativeContext;
-}
-
-#[cfg(target_os = "macos")]
-impl NativeContextFromGLContext for surfman::platform::macos::cgl::device::Device {
-    fn native_context_from_gl_context(
-        &self,
-        gl_context: &GLContext,
-    ) -> surfman::platform::macos::cgl::context::NativeContext {
-        let gst_gl_context = gl_context.to_glib_none();
-        let cgl_context =
-            unsafe { std::mem::transmute(gst_gl_context_get_gl_context(gst_gl_context.0)) };
-        surfman::platform::macos::cgl::context::NativeContext(cgl_context)
-    }
+// We need to convert between GStreamer's GL contexts and surfman's types.
+// The callee can assume that the gl context is current.
+trait FromCurrentGLContext {
+    unsafe fn from_current_gl_context(gl_context: &GLContext) -> Self;
 }
 
 #[cfg(all(unix, not(target_os = "macos")))]
-impl NativeContextFromGLContext for surfman::platform::unix::wayland::device::Device {
-    fn native_context_from_gl_context(
-        &self,
+impl FromCurrentGLContext for surfman::platform::unix::wayland::connection::NativeConnection {
+    unsafe fn from_current_gl_context(
         gl_context: &GLContext,
-    ) -> surfman::platform::unix::wayland::context::NativeContext {
+    ) -> surfman::platform::unix::wayland::connection::NativeConnection {
+        use gstreamer_gl_sys::*;
         let gst_gl_context = gl_context.to_glib_none();
-        let egl_context =
-            unsafe { std::mem::transmute(gst_gl_context_get_gl_context(gst_gl_context.0)) };
-        surfman::platform::unix::wayland::context::NativeContext {
-            egl_context,
-            egl_draw_surface: std::ptr::null(),
-            egl_read_surface: std::ptr::null(),
-        }
+        let gst_gl_display = gst_gl_context_get_display(gst_gl_context.0);
+        let gst_gl_display_type = gst_gl_display_get_handle_type(gst_gl_display);
+        assert_eq!(gst_gl_display_type, GST_GL_DISPLAY_TYPE_WAYLAND);
+        let wayland_display = (*(gst_gl_display as *mut GstGLDisplayWayland)).display as *mut _;
+        surfman::platform::unix::wayland::connection::NativeConnection::from_current_wayland_display(
+            wayland_display,
+        )
     }
 }
 

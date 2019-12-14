@@ -5482,7 +5482,7 @@ dependencies = [
 [[package]]
 name = "surfman"
 version = "0.2.0"
-source = "git+https://github.com/pcwalton/surfman?branch=multi#e4217239af05edd9292b6265c659045d035ec895"
+source = "git+https://github.com/asajeffrey/surfman?branch=mutli-wayland-connection-supply-egldisplay#4484f5492c77ab489a6ddf609e022c79881d9569"
 dependencies = [
  "bitflags",
  "cgl 0.3.2",
@@ -5523,7 +5523,7 @@ dependencies = [
 [[package]]
 name = "surfman-chains"
 version = "0.3.0"
-source = "git+https://github.com/asajeffrey/surfman-chains?branch=multi#5933975cd829197893428b572d734d72e50785c5"
+source = "git+https://github.com/asajeffrey/surfman-chains?branch=multi#80a71b1a2df71ae70c3c194d0af40b8ebf72968a"
 dependencies = [
  "euclid",
  "fnv",
@@ -6439,14 +6439,9 @@ dependencies = [
  "log",
  "openxr",
  "serde",
-<<<<<<< HEAD
- "surfman",
- "surfman-chains",
- "time",
-=======
  "surfman 0.1.3",
  "surfman-chains 0.2.1",
->>>>>>> 0e7dad8239... WIP
+ "time",
  "webxr-api",
  "winapi",
  "wio",

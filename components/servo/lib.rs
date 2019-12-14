@@ -118,12 +118,8 @@ use std::cmp::max;
 use std::path::PathBuf;
 use std::rc::Rc;
 use std::sync::{Arc, Mutex};
-#[cfg(not(target_os = "windows"))]
-use surfman::platform::default::device::Device as HWDevice;
-#[cfg(not(target_os = "windows"))]
-use surfman::platform::generic::osmesa::device::Device as SWDevice;
-#[cfg(not(target_os = "windows"))]
-use surfman::platform::generic::universal::context::Context;
+use surfman::platform::generic::universal::adapter::Adapter;
+use surfman::platform::generic::universal::connection::Connection;
 use surfman::platform::generic::universal::device::Device;
 use webrender::{RendererKind, ShaderPrecacheFlags};
 use webrender_traits::WebrenderImageHandlerType;
@@ -1041,39 +1037,30 @@ fn create_webgl_threads<W>(
 where
     W: WindowMethods + 'static + ?Sized,
 {
-    // Create a `surfman` device and context.
-    window.make_gl_context_current();
+    // Bootstrap surfman
+    let version = surfman::GLVersion { major: 3, minor: 0 };
+    let flags = surfman::ContextAttributeFlags::all();
+    let attributes = surfman::ContextAttributes { version, flags };
+
+    let connection = Connection::new().expect("Failed to create connection");
 
     #[cfg(not(target_os = "windows"))]
-    let (device, context) = unsafe {
-        if opts::get().headless {
-            let (device, context) = match SWDevice::from_current_context() {
-                Ok(a) => a,
-                Err(e) => {
-                    warn!("Failed to create software graphics context: {:?}", e);
-                    return None;
-                },
-            };
-            (Device::Software(device), Context::Software(context))
-        } else {
-            let (device, context) = match HWDevice::from_current_context() {
-                Ok(a) => a,
-                Err(e) => {
-                    warn!("Failed to create hardware graphics context: {:?}", e);
-                    return None;
-                },
-            };
-            (Device::Hardware(device), Context::Hardware(context))
-        }
+    let adapter = if opts::get().headless {
+        Adapter::hardware().expect("Failed to create hw adapter")
+    } else {
+        Adapter::software().expect("Failed to create sw adapter")
     };
+
     #[cfg(target_os = "windows")]
-    let (device, context) = match unsafe { Device::from_current_context() } {
-        Ok(a) => a,
-        Err(e) => {
-            warn!("Failed to create graphics context: {:?}", e);
-            return None;
-        },
-    };
+    let adapter = Adapter::default().expect("Failed to create adapter");
+
+    let mut device = Device::new(&connection, &adapter).expect("Failed to create device");
+    let descriptor = device
+        .create_context_descriptor(&attributes)
+        .expect("Failed to create descriptor");
+    let context = device
+        .create_context(&descriptor)
+        .expect("Failed to create context");
 
     let gl_type = match window.gl().get_type() {
         gleam::gl::GlType::Gl => sparkle::gl::GlType::Gl,
