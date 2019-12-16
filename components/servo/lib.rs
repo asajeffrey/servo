@@ -1046,9 +1046,9 @@ where
 
     #[cfg(not(target_os = "windows"))]
     let adapter = if opts::get().headless {
-        Adapter::hardware().expect("Failed to create hw adapter")
-    } else {
         Adapter::software().expect("Failed to create sw adapter")
+    } else {
+        Adapter::hardware().expect("Failed to create hw adapter")
     };
 
     #[cfg(target_os = "windows")]

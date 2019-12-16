@@ -57,10 +57,14 @@ use gstreamer_gl::GLContext;
 use gstreamer_gl::GLContextExt;
 use gstreamer_gl::GLContextExtManual;
 use gstreamer_gl_sys::gst_gl_context_thread_add;
+use gstreamer_gl_sys::gst_gl_sync_meta_api_get_type;
+use gstreamer_gl_sys::gst_gl_sync_meta_set_sync_point;
 use gstreamer_gl_sys::gst_gl_texture_target_to_gl;
 use gstreamer_gl_sys::gst_is_gl_memory;
 use gstreamer_gl_sys::GstGLContext;
 use gstreamer_gl_sys::GstGLMemory;
+use gstreamer_gl_sys::GstGLSyncMeta;
+use gstreamer_sys::gst_buffer_get_meta;
 use gstreamer_video::VideoInfo;
 
 use log::debug;
@@ -134,6 +138,7 @@ struct ServoWebSrcGfx {
     device: Device,
     context: Context,
     gl: Rc<Gl>,
+    gl_context: GLContext,
     read_fbo: GLuint,
     draw_fbo: GLuint,
 }
@@ -167,8 +172,14 @@ const DEFAULT_FRAME_DURATION: Duration = Duration::from_micros(16_667);
 struct ServoThread {
     receiver: Receiver<ServoWebSrcMsg>,
     swap_chain: SwapChain<Device>,
-    gfx: Rc<RefCell<ServoWebSrcGfx>>,
+    gfx: Rc<RefCell<ServoThreadGfx>>,
     servo: Servo<ServoWebSrcWindow>,
+}
+
+struct ServoThreadGfx {
+    device: Device,
+    context: Context,
+    gl: Rc<Gl>,
 }
 
 impl ServoThread {
@@ -267,13 +278,13 @@ impl EventLoopWaker for ServoWebSrcEmbedder {
 
 struct ServoWebSrcWindow {
     swap_chain: SwapChain<Device>,
-    gfx: Rc<RefCell<ServoWebSrcGfx>>,
+    gfx: Rc<RefCell<ServoThreadGfx>>,
     gl: Rc<dyn gleam::gl::Gl>,
 }
 
 impl ServoWebSrcWindow {
     fn new() -> Self {
-        let version = GLVersion { major: 3, minor: 0 };
+        let version = GLVersion { major: 4, minor: 3 };
         let flags = ContextAttributeFlags::DEPTH |
             ContextAttributeFlags::STENCIL |
             ContextAttributeFlags::ALPHA;
@@ -294,8 +305,8 @@ impl ServoWebSrcWindow {
             .expect("Failed to create context");
 
         let gleam =
-            unsafe { gleam::gl::GlesFns::load_with(|s| device.get_proc_address(&context, s)) };
-        let gl = Gl::gles_fns(gl::ffi_gles::Gles2::load_with(|s| {
+            unsafe { gleam::gl::GlFns::load_with(|s| device.get_proc_address(&context, s)) };
+        let gl = Gl::gl_fns(gl::ffi_gl::Gl::load_with(|s| {
             device.get_proc_address(&context, s)
         }));
 
@@ -303,7 +314,7 @@ impl ServoWebSrcWindow {
             .make_context_current(&mut context)
             .expect("Failed to make context current");
         debug_assert_eq!(gl.get_error(), gl::NO_ERROR);
-        let access = SurfaceAccess::GPUOnly;
+        let access = SurfaceAccess::GPUCPU;
         let size = Size2D::new(512, 512);
         let surface_type = SurfaceType::Generic { size };
         let surface = device
@@ -328,17 +339,12 @@ impl ServoWebSrcWindow {
         let swap_chain = SwapChain::create_attached(&mut device, &mut context, access)
             .expect("Failed to create swap chain");
 
-        let read_fbo = gl.gen_framebuffers(1)[0];
-        let draw_fbo = gl.gen_framebuffers(1)[0];
-
         device.make_no_context_current().unwrap();
 
-        let gfx = Rc::new(RefCell::new(ServoWebSrcGfx {
+        let gfx = Rc::new(RefCell::new(ServoThreadGfx {
             device,
             context,
             gl,
-            read_fbo,
-            draw_fbo,
         }));
 
         Self {
@@ -391,6 +397,7 @@ impl WindowMethods for ServoWebSrcWindow {
         gfx.device
             .make_context_current(&mut gfx.context)
             .expect("Failed to make context current");
+        debug!("EMBEDDER done make_context_current");
         debug_assert_eq!(
             (
                 gfx.gl.check_framebuffer_status(gl::FRAMEBUFFER),
@@ -680,6 +687,15 @@ impl BaseSrcImpl for ServoWebSrc {
         unsafe { gst_gl_context_thread_add(gl_memory.mem.context, Some(fill_on_gl_thread), data) };
         task.result?;
 
+        // Put down a GL sync point if needed
+        let gst_buffer = buffer.to_glib_none();
+        let sync_meta_type = unsafe { gst_gl_sync_meta_api_get_type() };
+        let sync_meta =
+            unsafe { gst_buffer_get_meta(gst_buffer.0, sync_meta_type) } as *mut GstGLSyncMeta;
+        if !sync_meta.is_null() {
+            unsafe { gst_gl_sync_meta_set_sync_point(sync_meta, gl_memory.mem.context) };
+        }
+
         // Wake up Servo
         let _ = self.sender.send(ServoWebSrcMsg::Heartbeat);
         Ok(buffer)
@@ -744,16 +760,19 @@ impl ServoWebSrc {
                 };
 
                 debug!("Creating GL bindings");
-                let gl = Gl::gles_fns(gl::ffi_gles::Gles2::load_with(|s| {
+                let gl = Gl::gl_fns(gl::ffi_gl::Gl::load_with(|s| {
                     gl_context.get_proc_address(s) as *const _
                 }));
                 let draw_fbo = gl.gen_framebuffers(1)[0];
                 let read_fbo = gl.gen_framebuffers(1)[0];
+                let gl_context = gl_context.clone();
+
                 debug!("Created GL bindings");
                 ServoWebSrcGfx {
                     device,
                     context,
                     gl,
+                    gl_context,
                     read_fbo,
                     draw_fbo,
                 }
@@ -795,10 +814,10 @@ impl ServoWebSrc {
                 }
 
                 if size.width <= 0 || size.height <= 0 {
-		    info!("Surface is zero-sized");
+                    info!("Surface is zero-sized");
                     self.swap_chain.recycle_surface(surface);
-		    return;
-		}
+                    return;
+                }
 
                 let surface_texture = gfx
                     .device
@@ -811,7 +830,7 @@ impl ServoWebSrc {
                     "Filling with {}/{} {}",
                     read_texture_id, read_texture_target, surface_size
                 );
-		gfx.gl.bind_framebuffer(gl::READ_FRAMEBUFFER, gfx.read_fbo);
+                gfx.gl.bind_framebuffer(gl::READ_FRAMEBUFFER, gfx.read_fbo);
                 gfx.gl.framebuffer_texture_2d(
                     gl::READ_FRAMEBUFFER,
                     gl::COLOR_ATTACHMENT0,
@@ -835,7 +854,11 @@ impl ServoWebSrc {
                         gfx.gl.check_framebuffer_status(gl::DRAW_FRAMEBUFFER),
                         gfx.gl.get_error()
                     ),
-                    (gl::FRAMEBUFFER_COMPLETE, gl::FRAMEBUFFER_COMPLETE, gl::NO_ERROR)
+                    (
+                        gl::FRAMEBUFFER_COMPLETE,
+                        gl::FRAMEBUFFER_COMPLETE,
+                        gl::NO_ERROR
+                    )
                 );
 
                 debug!("Blitting");
@@ -905,7 +928,7 @@ impl FromCurrentGLContext for surfman::platform::macos::cgl::context::NativeCont
         let gst_gl_platform = gst_gl_context_get_gl_platform(gst_gl_context.0);
         assert_eq!(gst_gl_platform, GST_GL_PLATFORM_CGL);
         let cgl_context = gst_gl_context_get_gl_context(gst_gl_context.0) as *mut _;
-	surfman::platform::macos::cgl::context::NativeContext(cgl_context)
+        surfman::platform::macos::cgl::context::NativeContext(cgl_context)
     }
 }
 
