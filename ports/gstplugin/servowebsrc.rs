@@ -56,6 +56,7 @@ use gstreamer_base::BaseSrcExt;
 use gstreamer_gl::GLContext;
 use gstreamer_gl::GLContextExt;
 use gstreamer_gl::GLContextExtManual;
+use gstreamer_gl::GLAPI;
 use gstreamer_gl_sys::gst_gl_context_thread_add;
 use gstreamer_gl_sys::gst_gl_sync_meta_api_get_type;
 use gstreamer_gl_sys::gst_gl_sync_meta_set_sync_point;
@@ -68,6 +69,7 @@ use gstreamer_sys::gst_buffer_get_meta;
 use gstreamer_video::VideoInfo;
 
 use log::debug;
+use log::error;
 use log::info;
 
 use servo::compositing::windowing::AnimationState;
@@ -84,6 +86,7 @@ use servo::Servo;
 use sparkle::gl;
 use sparkle::gl::types::GLuint;
 use sparkle::gl::Gl;
+use sparkle::gl::GlType;
 
 use surfman::connection::Connection as ConnectionAPI;
 use surfman::device::Device as DeviceAPI;
@@ -124,6 +127,7 @@ pub struct ServoWebSrc {
     url: Mutex<Option<String>>,
     info: Mutex<Option<VideoInfo>>,
     buffer_pool: Mutex<Option<BufferPool>>,
+    gl_context: Mutex<Option<GLContext>>,
     // When did the plugin get created?
     start: Instant,
     // How long should each frame last?
@@ -138,7 +142,6 @@ struct ServoWebSrcGfx {
     device: Device,
     context: Context,
     gl: Rc<Gl>,
-    gl_context: GLContext,
     read_fbo: GLuint,
     draw_fbo: GLuint,
 }
@@ -156,7 +159,7 @@ thread_local! {
 
 #[derive(Debug)]
 enum ServoWebSrcMsg {
-    Start(ServoUrl),
+    Start(GLVersion, GlType, ServoUrl),
     GetSwapChain(Sender<SwapChain<Device>>),
     Resize(Size2D<i32, DevicePixel>),
     Heartbeat,
@@ -184,11 +187,21 @@ struct ServoThreadGfx {
 
 impl ServoThread {
     fn new(receiver: Receiver<ServoWebSrcMsg>) -> Self {
+        let (version, gl_type, url) = match receiver.recv() {
+            Ok(ServoWebSrcMsg::Start(version, gl_type, url)) => (version, gl_type, url),
+            e => panic!("Failed to start ({:?})", e),
+        };
+        info!(
+            "Created new servo thread ({:?} {:?} for {:?})",
+            version, gl_type, url
+        );
         let embedder = Box::new(ServoWebSrcEmbedder);
-        let window = Rc::new(ServoWebSrcWindow::new());
+        let window = Rc::new(ServoWebSrcWindow::new(version, gl_type));
         let swap_chain = window.swap_chain.clone();
         let gfx = window.gfx.clone();
-        let servo = Servo::new(embedder, window);
+        let mut servo = Servo::new(embedder, window);
+        let id = TopLevelBrowsingContextId::new();
+        servo.handle_events(vec![WindowEvent::NewBrowser(url, id)]);
 
         Self {
             receiver,
@@ -202,7 +215,7 @@ impl ServoThread {
         while let Ok(msg) = self.receiver.recv() {
             debug!("Servo thread handling message {:?}", msg);
             match msg {
-                ServoWebSrcMsg::Start(url) => self.new_browser(url),
+                ServoWebSrcMsg::Start(..) => error!("Already started"),
                 ServoWebSrcMsg::GetSwapChain(sender) => sender
                     .send(self.swap_chain.clone())
                     .expect("Failed to send swap chain"),
@@ -212,12 +225,6 @@ impl ServoThread {
             }
         }
         self.servo.handle_events(vec![WindowEvent::Quit]);
-    }
-
-    fn new_browser(&mut self, url: ServoUrl) {
-        let id = TopLevelBrowsingContextId::new();
-        self.servo
-            .handle_events(vec![WindowEvent::NewBrowser(url, id)]);
     }
 
     fn resize(&mut self, size: Size2D<i32, DevicePixel>) {
@@ -283,8 +290,7 @@ struct ServoWebSrcWindow {
 }
 
 impl ServoWebSrcWindow {
-    fn new() -> Self {
-        let version = GLVersion { major: 4, minor: 3 };
+    fn new(version: GLVersion, gl_type: GlType) -> Self {
         let flags = ContextAttributeFlags::DEPTH |
             ContextAttributeFlags::STENCIL |
             ContextAttributeFlags::ALPHA;
@@ -304,11 +310,22 @@ impl ServoWebSrcWindow {
             .create_context(&descriptor)
             .expect("Failed to create context");
 
-        let gleam =
-            unsafe { gleam::gl::GlFns::load_with(|s| device.get_proc_address(&context, s)) };
-        let gl = Gl::gl_fns(gl::ffi_gl::Gl::load_with(|s| {
-            device.get_proc_address(&context, s)
-        }));
+        let (gleam, gl) = unsafe {
+            match gl_type {
+                GlType::Gl => (
+                    gleam::gl::GlFns::load_with(|s| device.get_proc_address(&context, s)),
+                    Gl::gl_fns(gl::ffi_gl::Gl::load_with(|s| {
+                        device.get_proc_address(&context, s)
+                    })),
+                ),
+                GlType::Gles => (
+                    gleam::gl::GlesFns::load_with(|s| device.get_proc_address(&context, s)),
+                    Gl::gles_fns(gl::ffi_gles::Gles2::load_with(|s| {
+                        device.get_proc_address(&context, s)
+                    })),
+                ),
+            }
+        };
 
         device
             .make_context_current(&mut context)
@@ -473,6 +490,7 @@ impl ObjectSubclass for ServoWebSrc {
         let info = Mutex::new(None);
         let url = Mutex::new(None);
         let buffer_pool = Mutex::new(None);
+        let gl_context = Mutex::new(None);
         let start = Instant::now();
         let frame_duration_micros = AtomicU64::new(DEFAULT_FRAME_DURATION.as_micros() as u64);
         let next_frame_micros = AtomicU64::new(0);
@@ -482,6 +500,7 @@ impl ObjectSubclass for ServoWebSrc {
             info,
             url,
             buffer_pool,
+            gl_context,
             start,
             frame_duration_micros,
             next_frame_micros,
@@ -575,6 +594,7 @@ impl BaseSrcImpl for ServoWebSrc {
         if gst_gl_context.is_null() {
             return Err(gst_loggable_error!(CATEGORY, "Failed to get GL context"));
         }
+        let gl_context = unsafe { GLContext::from_glib_borrow(gst_gl_context) };
 
         // Create a new buffer pool for GL memory
         let gst_gl_buffer_pool =
@@ -594,8 +614,9 @@ impl BaseSrcImpl for ServoWebSrc {
         pool.set_config(config)
             .map_err(|_| gst_loggable_error!(CATEGORY, "Failed to update config"))?;
 
-        // Save the buffer pool for later use
+        // Save the buffer pool and GL context for later use
         *self.buffer_pool.lock().expect("Poisoned lock") = Some(pool);
+        *self.gl_context.lock().expect("Poisoned lock") = Some(gl_context);
 
         Ok(())
     }
@@ -617,7 +638,32 @@ impl BaseSrcImpl for ServoWebSrc {
         let url = guard.as_ref().map(|s| &**s).unwrap_or(DEFAULT_URL);
         let url = ServoUrl::parse(url)
             .map_err(|_| gst_error_msg!(ResourceError::Settings, ["Failed to parse url"]))?;
-        let _ = self.sender.send(ServoWebSrcMsg::Start(url));
+
+        // Get the GL API and version
+        let gl_context_guard = self.gl_context.lock().unwrap();
+        let gl_context = gl_context_guard.as_ref().ok_or_else(|| {
+            gst_error_msg!(ResourceError::Settings, ["Starting before setting caps"])
+        })?;
+        let gl_api = gl_context.get_gl_api();
+        let gl_version = gl_context.get_gl_version();
+        let gl_type = if gl_api.intersects(GLAPI::GLES1 | GLAPI::GLES2) {
+            GlType::Gles
+        } else if gl_api.intersects(GLAPI::OPENGL | GLAPI::OPENGL3) {
+            GlType::Gl
+        } else {
+            return Err(gst_error_msg!(
+                ResourceError::Settings,
+                ["Unsupported GL API"]
+            ));
+        };
+        let version = GLVersion {
+            major: gl_version.0 as u8,
+            minor: gl_version.1 as u8,
+        };
+
+        let _ = self
+            .sender
+            .send(ServoWebSrcMsg::Start(version, gl_type, url));
         Ok(())
     }
 
@@ -765,14 +811,12 @@ impl ServoWebSrc {
                 }));
                 let draw_fbo = gl.gen_framebuffers(1)[0];
                 let read_fbo = gl.gen_framebuffers(1)[0];
-                let gl_context = gl_context.clone();
 
                 debug!("Created GL bindings");
                 ServoWebSrcGfx {
                     device,
                     context,
                     gl,
-                    gl_context,
                     read_fbo,
                     draw_fbo,
                 }
@@ -952,7 +996,7 @@ impl FromCurrentGLContext for surfman::platform::unix::wayland::connection::Nati
 #[cfg(all(unix, not(target_os = "macos")))]
 impl FromCurrentGLContext for surfman::platform::unix::wayland::context::NativeContext {
     unsafe fn from_current_gl_context(
-        gl_context: &GLContext,
+        _gl_context: &GLContext,
     ) -> surfman::platform::unix::wayland::context::NativeContext {
         surfman::platform::unix::wayland::context::NativeContext::current()
     }
