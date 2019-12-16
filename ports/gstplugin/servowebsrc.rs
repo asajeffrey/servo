@@ -736,7 +736,7 @@ impl ServoWebSrc {
                 let device = connection
                     .create_device(&adapter)
                     .expect("Failed to bootstrap device");
-                let native_context = NativeContext::current();
+                let native_context = unsafe { NativeContext::from_current_gl_context(&gl_context) };
                 let context = unsafe {
                     device
                         .create_context_from_native_context(native_context)
@@ -886,6 +886,29 @@ trait FromCurrentGLContext {
     unsafe fn from_current_gl_context(gl_context: &GLContext) -> Self;
 }
 
+#[cfg(target_os = "macos")]
+impl FromCurrentGLContext for surfman::platform::macos::cgl::connection::NativeConnection {
+    unsafe fn from_current_gl_context(
+        _gl_context: &GLContext,
+    ) -> surfman::platform::macos::cgl::connection::NativeConnection {
+        surfman::platform::macos::cgl::connection::NativeConnection
+    }
+}
+
+#[cfg(target_os = "macos")]
+impl FromCurrentGLContext for surfman::platform::macos::cgl::context::NativeContext {
+    unsafe fn from_current_gl_context(
+        gl_context: &GLContext,
+    ) -> surfman::platform::macos::cgl::context::NativeContext {
+        use gstreamer_gl_sys::*;
+        let gst_gl_context = gl_context.to_glib_none();
+        let gst_gl_platform = gst_gl_context_get_gl_platform(gst_gl_context.0);
+        assert_eq!(gst_gl_platform, GST_GL_PLATFORM_CGL);
+        let cgl_context = gst_gl_context_get_gl_context(gst_gl_context.0) as *mut _;
+	surfman::platform::macos::cgl::context::NativeContext(cgl_context)
+    }
+}
+
 #[cfg(all(unix, not(target_os = "macos")))]
 impl FromCurrentGLContext for surfman::platform::unix::wayland::connection::NativeConnection {
     unsafe fn from_current_gl_context(
@@ -900,6 +923,15 @@ impl FromCurrentGLContext for surfman::platform::unix::wayland::connection::Nati
         surfman::platform::unix::wayland::connection::NativeConnection::from_current_wayland_display(
             wayland_display,
         )
+    }
+}
+
+#[cfg(all(unix, not(target_os = "macos")))]
+impl FromCurrentGLContext for surfman::platform::unix::wayland::context::NativeContext {
+    unsafe fn from_current_gl_context(
+        gl_context: &GLContext,
+    ) -> surfman::platform::unix::wayland::context::NativeContext {
+        surfman::platform::unix::wayland::context::NativeContext::current()
     }
 }
 
