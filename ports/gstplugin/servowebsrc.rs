@@ -851,7 +851,7 @@ impl ServoWebSrc {
             gfx.gl.framebuffer_texture_2d(
                 gl::FRAMEBUFFER,
                 gl::COLOR_ATTACHMENT0,
-                gl::TEXTURE_2D,
+                draw_texture_target,
                 draw_texture_id,
                 0,
             );
