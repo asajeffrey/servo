@@ -123,7 +123,6 @@ use std::time::Instant;
 
 pub struct ServoWebSrc {
     sender: Sender<ServoWebSrcMsg>,
-    swap_chain: SwapChain<Device>,
     url: Mutex<Option<String>>,
     info: Mutex<Option<VideoInfo>>,
     buffer_pool: Mutex<Option<BufferPool>>,
@@ -141,6 +140,7 @@ pub struct ServoWebSrc {
 struct ServoWebSrcGfx {
     device: Device,
     context: Context,
+    swap_chain: SwapChain<Device>,
     gl: Rc<Gl>,
     read_fbo: GLuint,
     draw_fbo: GLuint,
@@ -484,9 +484,6 @@ impl ObjectSubclass for ServoWebSrc {
     fn new() -> Self {
         let (sender, receiver) = crossbeam_channel::bounded(1);
         thread::spawn(move || ServoThread::new(receiver).run());
-        let (acks, ackr) = crossbeam_channel::bounded(1);
-        let _ = sender.send(ServoWebSrcMsg::GetSwapChain(acks));
-        let swap_chain = ackr.recv().expect("Failed to get swap chain");
         let info = Mutex::new(None);
         let url = Mutex::new(None);
         let buffer_pool = Mutex::new(None);
@@ -496,7 +493,6 @@ impl ObjectSubclass for ServoWebSrc {
         let next_frame_micros = AtomicU64::new(0);
         Self {
             sender,
-            swap_chain,
             info,
             url,
             buffer_pool,
@@ -564,6 +560,8 @@ impl ElementImpl for ServoWebSrc {}
 
 impl BaseSrcImpl for ServoWebSrc {
     fn set_caps(&self, src: &BaseSrc, outcaps: &Caps) -> Result<(), LoggableError> {
+        info!("Setting caps {:?}", outcaps);
+
         // Save the video info for later use
         let info = VideoInfo::from_caps(outcaps)
             .ok_or_else(|| gst_loggable_error!(CATEGORY, "Failed to get video info"))?;
@@ -581,22 +579,15 @@ impl BaseSrcImpl for ServoWebSrc {
                 .store(frame_duration_micros, Ordering::SeqCst);
         }
 
-        // Get the downstream GL context
-        let mut gst_gl_context = std::ptr::null_mut();
-        let el = src.upcast_ref::<Element>();
-        unsafe {
-            gstreamer_gl_sys::gst_gl_query_local_gl_context(
-                el.as_ptr(),
-                gstreamer_sys::GST_PAD_SRC,
-                &mut gst_gl_context,
-            );
-        }
-        if gst_gl_context.is_null() {
-            return Err(gst_loggable_error!(CATEGORY, "Failed to get GL context"));
-        }
-        let gl_context = unsafe { GLContext::from_glib_borrow(gst_gl_context) };
-
         // Create a new buffer pool for GL memory
+        let gst_gl_context = self
+            .gl_context
+            .lock()
+            .unwrap()
+            .as_ref()
+            .expect("Set caps before starting")
+            .to_glib_none()
+            .0;
         let gst_gl_buffer_pool =
             unsafe { gstreamer_gl_sys::gst_gl_buffer_pool_new(gst_gl_context) };
         if gst_gl_buffer_pool.is_null() {
@@ -614,9 +605,8 @@ impl BaseSrcImpl for ServoWebSrc {
         pool.set_config(config)
             .map_err(|_| gst_loggable_error!(CATEGORY, "Failed to update config"))?;
 
-        // Save the buffer pool and GL context for later use
+        // Save the buffer pool for later use
         *self.buffer_pool.lock().expect("Poisoned lock") = Some(pool);
-        *self.gl_context.lock().expect("Poisoned lock") = Some(gl_context);
 
         Ok(())
     }
@@ -629,21 +619,35 @@ impl BaseSrcImpl for ServoWebSrc {
         false
     }
 
-    fn start(&self, _src: &BaseSrc) -> Result<(), ErrorMessage> {
+    fn start(&self, src: &BaseSrc) -> Result<(), ErrorMessage> {
         info!("Starting");
-        let guard = self
+
+        // Get the URL
+        let url_guard = self
             .url
             .lock()
             .map_err(|_| gst_error_msg!(ResourceError::Settings, ["Failed to lock mutex"]))?;
-        let url = guard.as_ref().map(|s| &**s).unwrap_or(DEFAULT_URL);
-        let url = ServoUrl::parse(url)
+        let url_string = url_guard.as_ref().map(|s| &**s).unwrap_or(DEFAULT_URL);
+        let url = ServoUrl::parse(url_string)
             .map_err(|_| gst_error_msg!(ResourceError::Settings, ["Failed to parse url"]))?;
 
-        // Get the GL API and version
-        let gl_context_guard = self.gl_context.lock().unwrap();
-        let gl_context = gl_context_guard.as_ref().ok_or_else(|| {
-            gst_error_msg!(ResourceError::Settings, ["Starting before setting caps"])
-        })?;
+        // Get the downstream GL context
+        let mut gst_gl_context = std::ptr::null_mut();
+        let el = src.upcast_ref::<Element>();
+        unsafe {
+            gstreamer_gl_sys::gst_gl_query_local_gl_context(
+                el.as_ptr(),
+                gstreamer_sys::GST_PAD_SRC,
+                &mut gst_gl_context,
+            );
+        }
+        if gst_gl_context.is_null() {
+            return Err(gst_error_msg!(
+                ResourceError::Settings,
+                ["Failed to get GL context"]
+            ));
+        }
+        let gl_context = unsafe { GLContext::from_glib_borrow(gst_gl_context) };
         let gl_api = gl_context.get_gl_api();
         let gl_version = gl_context.get_gl_version();
         let gl_type = if gl_api.intersects(GLAPI::GLES1 | GLAPI::GLES2) {
@@ -661,6 +665,10 @@ impl BaseSrcImpl for ServoWebSrc {
             minor: gl_version.1 as u8,
         };
 
+        // Save the GL context for later use
+        *self.gl_context.lock().expect("Poisoned lock") = Some(gl_context);
+
+        // Inform servo we're starting
         let _ = self
             .sender
             .send(ServoWebSrcMsg::Start(version, gl_type, url));
@@ -812,10 +820,15 @@ impl ServoWebSrc {
                 let draw_fbo = gl.gen_framebuffers(1)[0];
                 let read_fbo = gl.gen_framebuffers(1)[0];
 
-                debug!("Created GL bindings");
+                debug!("Getting the swap chain1");
+                let (acks, ackr) = crossbeam_channel::bounded(1);
+                let _ = self.sender.send(ServoWebSrcMsg::GetSwapChain(acks));
+                let swap_chain = ackr.recv().expect("Failed to get swap chain");
+
                 ServoWebSrcGfx {
                     device,
                     context,
+                    swap_chain,
                     gl,
                     read_fbo,
                     draw_fbo,
@@ -848,7 +861,7 @@ impl ServoWebSrc {
             gfx.gl.clear(gl::COLOR_BUFFER_BIT);
             debug_assert_eq!(gfx.gl.get_error(), gl::NO_ERROR);
 
-            if let Some(surface) = self.swap_chain.take_surface() {
+            if let Some(surface) = gfx.swap_chain.take_surface() {
                 debug!("Rendering surface");
                 let surface_size = Size2D::from_untyped(gfx.device.surface_info(&surface).size);
                 if size != surface_size {
@@ -859,7 +872,7 @@ impl ServoWebSrc {
 
                 if size.width <= 0 || size.height <= 0 {
                     info!("Surface is zero-sized");
-                    self.swap_chain.recycle_surface(surface);
+                    gfx.swap_chain.recycle_surface(surface);
                     return;
                 }
 
@@ -930,7 +943,7 @@ impl ServoWebSrc {
                     .device
                     .destroy_surface_texture(&mut gfx.context, surface_texture)
                     .unwrap();
-                self.swap_chain.recycle_surface(surface);
+                gfx.swap_chain.recycle_surface(surface);
             } else {
                 debug!("Failed to get current surface");
             }
