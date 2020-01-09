@@ -118,13 +118,6 @@ use std::cmp::max;
 use std::path::PathBuf;
 use std::rc::Rc;
 use std::sync::{Arc, Mutex};
-#[cfg(not(target_os = "windows"))]
-use surfman::platform::default::device::Device as HWDevice;
-#[cfg(not(target_os = "windows"))]
-use surfman::platform::generic::osmesa::device::Device as SWDevice;
-#[cfg(not(target_os = "windows"))]
-use surfman::platform::generic::universal::context::Context;
-use surfman::platform::generic::universal::device::Device;
 use webrender::{RendererKind, ShaderPrecacheFlags};
 use webrender_traits::WebrenderImageHandlerType;
 use webrender_traits::{WebrenderExternalImageHandlers, WebrenderExternalImageRegistry};
@@ -1041,38 +1034,14 @@ fn create_webgl_threads<W>(
 where
     W: WindowMethods + 'static + ?Sized,
 {
-    // Create a `surfman` device and context.
-    window.make_gl_context_current();
-
-    #[cfg(not(target_os = "windows"))]
-    let (device, context) = unsafe {
-        if opts::get().headless {
-            let (device, context) = match SWDevice::from_current_context() {
-                Ok(a) => a,
-                Err(e) => {
-                    warn!("Failed to create software graphics context: {:?}", e);
-                    return None;
-                },
-            };
-            (Device::Software(device), Context::Software(context))
-        } else {
-            let (device, context) = match HWDevice::from_current_context() {
-                Ok(a) => a,
-                Err(e) => {
-                    warn!("Failed to create hardware graphics context: {:?}", e);
-                    return None;
-                },
-            };
-            (Device::Hardware(device), Context::Hardware(context))
-        }
-    };
-    #[cfg(target_os = "windows")]
-    let (device, context) = match unsafe { Device::from_current_context() } {
-        Ok(a) => a,
-        Err(e) => {
-            warn!("Failed to create graphics context: {:?}", e);
-            return None;
-        },
+    let connection = window.get_surfman_connection();
+    let adapter = window.get_surfman_adapter();
+    let native_context = window.get_native_context();
+    let device = connection.create_device(&adapter).unwrap();
+    let context = unsafe {
+        device
+            .create_context_from_native_context(native_context)
+            .unwrap()
     };
 
     let gl_type = match window.gl().get_type() {

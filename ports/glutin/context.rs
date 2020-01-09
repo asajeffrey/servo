@@ -6,6 +6,7 @@ use glutin::os::ContextTraitExt;
 use glutin::{ContextBuilder, CreationError, EventsLoop, NotCurrent, PossiblyCurrent, WindowedContext, WindowBuilder};
 use servo_media::player::context::GlContext as RawContext;
 use std::os::raw;
+use surfman::platform::default::context::NativeContext;
 
 pub enum GlContext {
     Current(WindowedContext<PossiblyCurrent>),
@@ -126,6 +127,27 @@ impl GlContext {
             }
             GlContext::None => unreachable!(),
         }
+    }
+
+    pub fn native_context(&self) -> NativeContext {
+        let raw_handle = match self {
+            GlContext::Current(c) => unsafe { c.raw_handle() },
+            GlContext::NotCurrent(c) => unsafe { c.raw_handle() },
+            GlContext::None => unreachable!(),
+        };
+        let handle = match raw_handle {
+             #[cfg(target_os = "linux")]
+             glutin::os::unix::RawHandle::Egl(handle) => handle,
+             #[cfg(target_os = "macos")]
+             handle => handle,
+             #[cfg(target_os = "windows")]
+             glutin::os::unix::RawHandle::Egl(handle) => handle,
+             #[cfg(target_os = "windows")]
+             glutin::os::unix::RawHandle::Wgl(handle) => handle,
+             #[allow(unreachable_patterns)]
+             _ => unimplemented!()
+        };
+        NativeContext(handle)
     }
 
     pub fn new_window<T>(

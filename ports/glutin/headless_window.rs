@@ -24,6 +24,10 @@ use std::mem;
 use std::os::raw::c_void;
 use std::ptr;
 use std::rc::Rc;
+use surfman::Adapter;
+use surfman::Connection;
+use surfman::NativeWidget;
+use surfman::platform::default::context::NativeContext;
 
 #[cfg(any(target_os = "linux", target_os = "macos"))]
 struct HeadlessContext {
@@ -217,32 +221,25 @@ impl WindowMethods for Window {
     fn get_gl_api(&self) -> MediaPlayerCtxt::GlApi {
         MediaPlayerCtxt::GlApi::None
     }
+
+    fn get_surfman_connection(&self) -> Connection { unimplemented!() }
+
+    fn get_surfman_adapter(&self) -> Adapter { unimplemented!() }
+
+    fn get_native_context(&self) -> NativeContext {
+        unimplemented!()
+    }
 }
 
 impl webxr::glwindow::GlWindow for Window {
-    fn make_current(&self) {}
-    fn swap_buffers(&self) {}
-    fn size(&self) -> UntypedSize2D<gl::GLsizei> {
-        let dpr = self.servo_hidpi_factor().get();
-        Size2D::new(
-            (self.context.width as f32 * dpr) as gl::GLsizei,
-            (self.context.height as f32 * dpr) as gl::GLsizei,
-        )
+    fn native_widget(&self) -> NativeWidget {
+        unimplemented!()
     }
-    fn new_window(&self) -> Result<Rc<dyn webxr::glwindow::GlWindow>, ()> {
-        let width = self.context.width;
-        let height = self.context.height;
-        let share = Some(&self.context);
-        let context = HeadlessContext::new(width, height, share);
-        let gl = self.gl.clone();
-        Ok(Rc::new(Window {
-            context,
-            gl,
-            animation_state: Cell::new(AnimationState::Idle),
-            fullscreen: Cell::new(false),
-            device_pixels_per_px: self.device_pixels_per_px,
-        }))
+
+    fn native_context(&self) -> NativeContext {
+        unimplemented!()
     }
+
     fn get_rotation(&self) -> Rotation3D<f32, UnknownUnit, UnknownUnit> {
         Rotation3D::identity()
     }

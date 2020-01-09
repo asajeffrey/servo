@@ -14,10 +14,10 @@ use sparkle::gl::GlType;
 use std::default::Default;
 use std::rc::Rc;
 use std::sync::{Arc, Mutex};
-use surfman::platform::generic::universal::context::Context;
-use surfman::platform::generic::universal::device::Device;
-use surfman::platform::generic::universal::surface::SurfaceTexture;
+use surfman::Context;
+use surfman::Device;
 use surfman::SurfaceInfo;
+use surfman::SurfaceTexture;
 use surfman_chains::SwapChains;
 use surfman_chains_api::SwapChainAPI;
 use surfman_chains_api::SwapChainsAPI;
@@ -26,7 +26,7 @@ use webxr_api::SwapChainId as WebXRSwapChainId;
 
 pub struct WebGLComm {
     pub webgl_threads: WebGLThreads,
-    pub webxr_swap_chains: SwapChains<WebXRSwapChainId>,
+    pub webxr_swap_chains: SwapChains<WebXRSwapChainId, Device>,
     pub image_handler: Box<dyn WebrenderExternalImageApi>,
     pub output_handler: Option<Box<dyn webrender_api::OutputImageHandler>>,
 }
@@ -84,7 +84,7 @@ impl WebGLComm {
 struct WebGLExternalImages {
     device: Device,
     context: Context,
-    swap_chains: SwapChains<WebGLContextId>,
+    swap_chains: SwapChains<WebGLContextId, Device>,
     locked_front_buffers: FnvHashMap<WebGLContextId, SurfaceTexture>,
 }
 
@@ -95,7 +95,11 @@ impl Drop for WebGLExternalImages {
 }
 
 impl WebGLExternalImages {
-    fn new(device: Device, context: Context, swap_chains: SwapChains<WebGLContextId>) -> Self {
+    fn new(
+        device: Device,
+        context: Context,
+        swap_chains: SwapChains<WebGLContextId, Device>,
+    ) -> Self {
         Self {
             device,
             context,
@@ -118,7 +122,7 @@ impl WebGLExternalImages {
             .device
             .create_surface_texture(&mut self.context, front_buffer)
             .unwrap();
-        let gl_texture = front_buffer_texture.gl_texture();
+        let gl_texture = self.device.surface_texture_object(&front_buffer_texture);
 
         self.locked_front_buffers.insert(id, front_buffer_texture);
 

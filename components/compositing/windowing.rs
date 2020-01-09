@@ -19,6 +19,9 @@ use std::fmt::{Debug, Error, Formatter};
 use std::rc::Rc;
 use std::time::Duration;
 use style_traits::DevicePixel;
+use surfman::platform::default::context::NativeContext;
+use surfman::Adapter;
+use surfman::Connection;
 
 use webrender_api::units::DevicePoint;
 use webrender_api::units::{DeviceIntPoint, DeviceIntRect, DeviceIntSize};
@@ -167,6 +170,13 @@ pub trait WindowMethods {
     fn get_native_display(&self) -> NativeDisplay;
     /// Get the GL api
     fn get_gl_api(&self) -> GlApi;
+    /// Get the surfman connection
+    fn get_surfman_connection(&self) -> Connection;
+    /// Get the surfman adapter
+    fn get_surfman_adapter(&self) -> Adapter;
+    /// Get the native context
+    /// TODO: duplication between this and `get_gl_context`?
+    fn get_native_context(&self) -> NativeContext;
 }
 
 pub trait EmbedderMethods {

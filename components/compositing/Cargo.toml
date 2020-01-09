@@ -36,6 +36,7 @@ servo_geometry = {path = "../geometry"}
 servo-media = {git = "https://github.com/servo/media"}
 servo_url = {path = "../url"}
 style_traits = {path = "../style_traits"}
+surfman = "0.2"
 time = "0.1.17"
 webrender = {git = "https://github.com/servo/webrender", features = ["capture"]}
 webrender_api = {git = "https://github.com/servo/webrender"}

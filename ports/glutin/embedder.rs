@@ -96,8 +96,11 @@ impl EmbedderMethods for EmbedderCallbacks {
             warn!("Creating test XR device");
             let gl = self.gl.clone();
             let window = self.window.clone();
-            let factory = Box::new(move || window.new_window());
-            let discovery = webxr::glwindow::GlWindowDiscovery::new(gl, factory);
+	    let connection = self.window.get_surfman_connection();
+	    let adapter = self.window.get_surfman_adapter();
+            // let factory = Box::new(move || window.new_window());
+            let factory = Box::new(move || unimplemented!());
+            let discovery = webxr::glwindow::GlWindowDiscovery::new(connection, adapter, gl, factory);
             xr.register(discovery);
         }
     }

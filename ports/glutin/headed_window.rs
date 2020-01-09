@@ -39,6 +39,10 @@ use servo_media::player::context::{GlApi, GlContext as PlayerGLContext, NativeDi
 use std::cell::{Cell, RefCell};
 use std::mem;
 use std::rc::Rc;
+use surfman::Connection;
+use surfman::Adapter;
+use surfman::NativeWidget;
+use surfman::platform::default::context::NativeContext;
 #[cfg(target_os = "windows")]
 use winapi;
 
@@ -560,28 +564,12 @@ impl WindowPortsMethods for Window {
 }
 
 impl webxr::glwindow::GlWindow for Window {
-    fn make_current(&self) {
-        debug!("Making window {:?} current", self.gl_context.borrow().window().id());
-        self.gl_context.borrow_mut().make_current();
+    fn native_widget(&self) -> NativeWidget {
+        unimplemented!()
     }
 
-    fn swap_buffers(&self) {
-        debug!("Swapping buffers on window {:?}", self.gl_context.borrow().window().id());
-        self.gl_context.borrow().swap_buffers();
-        self.gl_context.borrow_mut().make_not_current();
-    }
-
-    fn size(&self) -> UntypedSize2D<gl::GLsizei> {
-        let dpr = self.device_hidpi_factor().get() as f64;
-        let size = self
-            .gl_context
-            .borrow()
-            .window()
-            .get_inner_size()
-            .expect("Failed to get window inner size.");
-        let size = size.to_physical(dpr);
-        let (w, h): (u32, u32) = size.into();
-        Size2D::new(w as i32, h as i32)
+    fn native_context(&self) -> NativeContext {
+        unimplemented!()
     }
 
     fn get_rotation(&self) -> Rotation3D<f32, UnknownUnit, UnknownUnit> {
@@ -590,21 +578,6 @@ impl webxr::glwindow::GlWindow for Window {
 
     fn get_translation(&self) -> Vector3D<f32, UnknownUnit> {
         self.xr_translation.get().clone()
-    }
-
-    fn new_window(&self) -> Result<Rc<dyn webxr::glwindow::GlWindow>, ()> {
-        let window = Rc::new(Window::new(
-            self.inner_size.get(),
-            Some(self),
-            self.events_loop.clone(),
-            self.angle,
-            self.enable_vsync,
-            self.use_msaa,
-            self.no_native_titlebar,
-            self.device_pixels_per_px,
-        ));
-        app::register_window(window.clone());
-        Ok(window)
     }
 }
 
@@ -722,6 +695,21 @@ impl WindowMethods for Window {
             glutin::Api::OpenGlEs => GlApi::Gles1,
             _ => GlApi::None,
         }
+    }
+
+    fn get_surfman_connection(&self) -> Connection {
+       let gl_context = self.gl_context.borrow();
+       let window = gl_context.window();
+       Connection::from_winit_window(window).unwrap()
+    }
+
+    fn get_surfman_adapter(&self) -> Adapter {
+        let connection = self.get_surfman_connection();
+        connection.create_adapter().unwrap()
+    }
+
+    fn get_native_context(&self) -> NativeContext {
+        self.gl_context.borrow().native_context()
     }
 }
 
