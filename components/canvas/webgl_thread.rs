@@ -60,12 +60,12 @@ use std::slice;
 use std::sync::{Arc, Mutex};
 use std::thread;
 use surfman;
-use surfman::platform::generic::universal::adapter::Adapter;
-use surfman::platform::generic::universal::connection::Connection;
-use surfman::platform::generic::universal::context::Context;
-use surfman::platform::generic::universal::device::Device;
+use surfman::Adapter;
+use surfman::Connection;
+use surfman::Context;
 use surfman::ContextAttributeFlags;
 use surfman::ContextAttributes;
+use surfman::Device;
 use surfman::GLVersion;
 use surfman::SurfaceAccess;
 use surfman::SurfaceInfo;
@@ -137,9 +137,9 @@ pub(crate) struct WebGLThread {
     /// The receiver that should be used to send WebGL messages for processing.
     sender: WebGLSender<WebGLMsg>,
     /// The swap chains used by webrender
-    webrender_swap_chains: SwapChains<WebGLContextId>,
+    webrender_swap_chains: SwapChains<WebGLContextId, Device>,
     /// The swap chains used by webxr
-    webxr_swap_chains: SwapChains<WebXRSwapChainId>,
+    webxr_swap_chains: SwapChains<WebXRSwapChainId, Device>,
     /// Whether this context is a GL or GLES context.
     api_type: gl::GlType,
 }
@@ -157,8 +157,8 @@ pub(crate) struct WebGLThreadInit {
     pub external_images: Arc<Mutex<WebrenderExternalImageRegistry>>,
     pub sender: WebGLSender<WebGLMsg>,
     pub receiver: WebGLReceiver<WebGLMsg>,
-    pub webrender_swap_chains: SwapChains<WebGLContextId>,
-    pub webxr_swap_chains: SwapChains<WebXRSwapChainId>,
+    pub webrender_swap_chains: SwapChains<WebGLContextId, Device>,
+    pub webxr_swap_chains: SwapChains<WebXRSwapChainId, Device>,
     pub connection: Connection,
     pub adapter: Adapter,
     pub api_type: gl::GlType,
@@ -215,7 +215,9 @@ impl WebGLThread {
         }: WebGLThreadInit,
     ) -> Self {
         WebGLThread {
-            device: Device::new(&connection, &adapter).expect("Couldn't open WebGL device!"),
+            device: connection
+                .create_device(&adapter)
+                .expect("Couldn't open WebGL device!"),
             webrender_api: webrender_api_sender.create_api(),
             contexts: Default::default(),
             cached_context_info: Default::default(),
@@ -445,7 +447,7 @@ impl WebGLThread {
             .expect("Failed to create the GL context!");
         let surface = self
             .device
-            .create_surface(&ctx, surface_access, &surface_type)
+            .create_surface(&ctx, surface_access, surface_type)
             .expect("Failed to create the initial surface!");
         self.device
             .bind_surface_to_context(&mut ctx, surface)
@@ -2340,8 +2342,8 @@ impl WebGLImpl {
     /// Updates the swap buffers if the context surface needs to be changed
     fn attach_surface(
         context_id: WebGLContextId,
-        webrender_swap_chains: &SwapChains<WebGLContextId>,
-        webxr_swap_chains: &SwapChains<WebXRSwapChainId>,
+        webrender_swap_chains: &SwapChains<WebGLContextId, Device>,
+        webxr_swap_chains: &SwapChains<WebXRSwapChainId, Device>,
         request: WebGLFramebufferBindingRequest,
         ctx: &mut Context,
         device: &mut Device,

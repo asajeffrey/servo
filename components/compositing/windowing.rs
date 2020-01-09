@@ -6,8 +6,6 @@
 
 use embedder_traits::EventLoopWaker;
 use euclid::Scale;
-#[cfg(feature = "gl")]
-use gleam::gl;
 use keyboard_types::KeyboardEvent;
 use msg::constellation_msg::{PipelineId, TopLevelBrowsingContextId, TraversalDirection};
 use script_traits::{MediaSessionActionType, MouseButton, TouchEventType, TouchId, WheelDelta};
@@ -15,8 +13,6 @@ use servo_geometry::DeviceIndependentPixel;
 use servo_media::player::context::{GlApi, GlContext, NativeDisplay};
 use servo_url::ServoUrl;
 use std::fmt::{Debug, Error, Formatter};
-#[cfg(feature = "gl")]
-use std::rc::Rc;
 use std::time::Duration;
 use style_traits::DevicePixel;
 
@@ -24,6 +20,7 @@ use rust_webvr::VRServiceManager;
 use webrender_api::units::DevicePoint;
 use webrender_api::units::{DeviceIntPoint, DeviceIntRect, DeviceIntSize};
 use webrender_api::ScrollLocation;
+use webvr::VRServiceManager;
 use webvr_traits::WebVRMainThreadHeartbeat;
 
 #[derive(Clone)]
@@ -146,14 +143,10 @@ pub enum AnimationState {
     Animating,
 }
 
+// TODO: this trait assumes that the window is responsible
+// for creating the GL context, making it current, buffer
+// swapping, etc. Really that should all be done by surfman.
 pub trait WindowMethods {
-    /// Presents the window to the screen (perhaps by page flipping).
-    fn present(&self);
-    /// Make the OpenGL context current.
-    fn make_gl_context_current(&self);
-    /// Return the GL function pointer trait.
-    #[cfg(feature = "gl")]
-    fn gl(&self) -> Rc<dyn gl::Gl>;
     /// Get the coordinates of the native window, the screen and the framebuffer.
     fn get_coordinates(&self) -> EmbedderCoordinates;
     /// Set whether the application is currently animating.
@@ -161,12 +154,14 @@ pub trait WindowMethods {
     /// will want to avoid blocking on UI events, and just
     /// run the event loop at the vsync interval.
     fn set_animation_state(&self, _state: AnimationState);
-    /// Get the GL context
+    /// Get the media GL context
     fn get_gl_context(&self) -> GlContext;
-    /// Get the native display
+    /// Get the media native display
     fn get_native_display(&self) -> NativeDisplay;
     /// Get the GL api
     fn get_gl_api(&self) -> GlApi;
+    /// Get the webrender surfman instance
+    fn webrender_surfman(&self) -> WebrenderSurfman;
 }
 
 pub trait EmbedderMethods {

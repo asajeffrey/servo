@@ -6,7 +6,21 @@
 
 use euclid::default::Size2D;
 use std::collections::HashMap;
+use std::cell::RefCell;
+use std::ffi::c_void;
+use std::rc::Rc;
 use std::sync::{Arc, Mutex};
+use surfman::Adapter;
+use surfman::Connection;
+use surfman::Context;
+use surfman::ContextAttributes;
+use surfman::Error;
+use surfman::Device;
+use surfman::NativeWidget;
+use surfman::SurfaceAccess;
+use surfman::SurfaceType;
+use surfman::Surface;
+use surfman::SurfaceTexture;
 use webrender_api::units::TexelRect;
 
 /// This trait is used as a bridge between the different GL clients
@@ -146,5 +160,70 @@ impl webrender_api::ExternalImageHandler for WebrenderExternalImageHandlers {
             WebrenderImageHandlerType::WebGL => self.webgl_handler.as_mut().unwrap().unlock(key.0),
             WebrenderImageHandlerType::Media => self.media_handler.as_mut().unwrap().unlock(key.0),
         };
+    }
+}
+
+/// A bridge between webrender and surfman
+// TODO: move this into a different crate so that script doesn't depend on surfman
+#[derive(Clone)]
+pub struct WebrenderSurfman(Rc<WebrenderSurfmanData>);
+
+struct WebrenderSurfmanData {
+    device: Device,
+    mutable: RefCell<WebrenderSurfmanMutable>,
+}
+
+struct WebrenderSurfmanMutable {
+    context: Context,
+    render_surface: Surface,
+}
+
+impl Drop for WebrenderSurfmanData {
+    fn drop(&mut self) {
+        let ref mut mutable = *self.mutable.borrow_mut();
+        let _ = self.device.destroy_surface(&mut mutable.context, &mut mutable.render_surface);
+        let _ = self.device.destroy_context(&mut mutable.context);
+    }
+}
+
+impl WebrenderSurfman {
+    pub fn create(connection: &Connection, adapter: &Adapter, context_attributes: ContextAttributes, native_widget: NativeWidget) -> Result<Self, Error> {
+        let mut device = connection.create_device(&adapter)?;
+	let context_descriptor = device.create_context_descriptor(&context_attributes)?;
+        let context = device.create_context(&context_descriptor)?;
+        let surface_access = SurfaceAccess::GPUOnly;
+        let surface_type = SurfaceType::Widget { native_widget };
+	let render_surface = device.create_surface(&context, surface_access, surface_type)?;
+	let mutable = RefCell::new(WebrenderSurfmanMutable { context, render_surface });
+        Ok(WebrenderSurfman(Rc::new(WebrenderSurfmanData { device, mutable })))
+    }
+
+    pub fn create_surface_texture(&self, surface: Surface) -> Result<SurfaceTexture, (Error, Surface)> {
+        let mut mutable = self.0.mutable.borrow_mut();
+        self.0.device.create_surface_texture(&mut mutable.context, surface)
+    }
+
+    pub fn destroy_surface_texture(&self, surface_texture: SurfaceTexture) -> Result<Surface, (Error, SurfaceTexture)> {
+        let mut mutable = self.0.mutable.borrow_mut();
+        self.0.device.destroy_surface_texture(&mut mutable.context, surface_texture)
+    }
+
+    pub fn make_gl_context_current(&self) -> Result<(), Error> {
+        let mutable = self.0.mutable.borrow();
+        self.0.device.make_context_current(&mutable.context)
+    }
+
+    pub fn present(&self) -> Result<(), Error> {
+        let ref mut mutable = *self.0.mutable.borrow_mut();
+        self.0.device.present_surface(&mutable.context, &mut mutable.render_surface)
+    }
+
+    pub fn get_proc_address(&self, name: &str) -> *const c_void {
+        let mutable = self.0.mutable.borrow();
+	self.0.device.get_proc_address(&mutable.context, name)
+    }
+
+    pub fn device(&self) -> &Device {
+        &self.0.device
     }
 }

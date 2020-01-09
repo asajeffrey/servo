@@ -116,15 +116,10 @@ use std::cmp::max;
 use std::path::PathBuf;
 use std::rc::Rc;
 use std::sync::{Arc, Mutex};
-#[cfg(not(target_os = "windows"))]
-use surfman::platform::default::device::Device as HWDevice;
-#[cfg(not(target_os = "windows"))]
-use surfman::platform::generic::osmesa::device::Device as SWDevice;
-#[cfg(not(target_os = "windows"))]
-use surfman::platform::generic::universal::context::Context;
-use surfman::platform::generic::universal::device::Device;
+use surfman::GLApi;
 use webrender::{RendererKind, ShaderPrecacheFlags};
 use webrender_traits::WebrenderImageHandlerType;
+use webrender_traits::WebrenderSurfman;
 use webrender_traits::{WebrenderExternalImageHandlers, WebrenderExternalImageRegistry};
 use webvr::{VRServiceManager, WebVRCompositorHandler, WebVRThread};
 use webvr_traits::WebVRMsg;
@@ -336,8 +331,18 @@ where
             media_platform::init();
         }
 
+        // Initialize surfman
+        let webrender_surfman = window.webrender_surfman();
+
+        // Get GL bindings
+        let webrender_gl = 
+            match webrender_surfman.device().gl_api() {
+                GLApi::GL => unsafe { gl::GlFns::load_with(|s| webrender_surfman.get_proc_address(s)) },
+                GLApi::GLES => unsafe { gl::GlesFns::load_with(|s| webrender_surfman.get_proc_address(s)) },
+	  };
+
         // Make sure the gl context is made current.
-        window.make_gl_context_current();
+        webrender_surfman.make_gl_context_current().unwrap();
 
         // Reserving a namespace to create TopLevelBrowserContextId.
         PipelineNamespace::install(PipelineNamespaceId(0));
@@ -387,7 +392,7 @@ where
             let window_size = Size2D::from_untyped(viewport_size.to_i32().to_untyped());
 
             webrender::Renderer::new(
-                window.gl(),
+                webrender_gl.clone(),
                 render_notifier,
                 webrender::RendererOptions {
                     device_pixel_ratio,
@@ -465,7 +470,8 @@ where
         let mut external_image_handlers = Box::new(external_image_handlers);
 
         let webgl_threads = create_webgl_threads(
-            &*window,
+            webrender_surfman.clone(),
+            webrender_gl.clone(),
             &mut webrender,
             webrender_api_sender.clone(),
             webvr_compositor,
@@ -548,6 +554,8 @@ where
                 webrender,
                 webrender_document,
                 webrender_api,
+		webrender_surfman,
+		webrender_gl,
                 webvr_heartbeats,
                 webxr_main_thread,
             },
@@ -1024,53 +1032,17 @@ fn create_sandbox() {
 }
 
 // Initializes the WebGL thread.
-fn create_webgl_threads<W>(
-    window: &W,
+fn create_webgl_threads(
+    webrender_surfman: WebrenderSurfman,
+    webrender_gl: Rc<dyn gl::Gl>,
     webrender: &mut webrender::Renderer,
     webrender_api_sender: webrender_api::RenderApiSender,
     webvr_compositor: Option<Box<WebVRCompositorHandler>>,
     webxr_main_thread: &mut webxr::MainThreadRegistry,
     external_image_handlers: &mut WebrenderExternalImageHandlers,
     external_images: Arc<Mutex<WebrenderExternalImageRegistry>>,
-) -> Option<WebGLThreads>
-where
-    W: WindowMethods + 'static + ?Sized,
-{
-    // Create a `surfman` device and context.
-    window.make_gl_context_current();
-
-    #[cfg(not(target_os = "windows"))]
-    let (device, context) = unsafe {
-        if opts::get().headless {
-            let (device, context) = match SWDevice::from_current_context() {
-                Ok(a) => a,
-                Err(e) => {
-                    warn!("Failed to create software graphics context: {:?}", e);
-                    return None;
-                },
-            };
-            (Device::Software(device), Context::Software(context))
-        } else {
-            let (device, context) = match HWDevice::from_current_context() {
-                Ok(a) => a,
-                Err(e) => {
-                    warn!("Failed to create hardware graphics context: {:?}", e);
-                    return None;
-                },
-            };
-            (Device::Hardware(device), Context::Hardware(context))
-        }
-    };
-    #[cfg(target_os = "windows")]
-    let (device, context) = match unsafe { Device::from_current_context() } {
-        Ok(a) => a,
-        Err(e) => {
-            warn!("Failed to create graphics context: {:?}", e);
-            return None;
-        },
-    };
-
-    let gl_type = match window.gl().get_type() {
+) -> Option<WebGLThreads> {
+    let gl_type = match webrender_gl.get_type() {
         gleam::gl::GlType::Gl => sparkle::gl::GlType::Gl,
         gleam::gl::GlType::Gles => sparkle::gl::GlType::Gles,
     };
@@ -1081,9 +1053,8 @@ where
         image_handler,
         output_handler,
     } = WebGLComm::new(
-        device,
-        context,
-        window.gl(),
+        webrender_surfman,
+	webrender_gl,
         webrender_api_sender,
         webvr_compositor.map(|compositor| compositor as Box<_>),
         external_images,
