@@ -1043,6 +1043,7 @@ where
             .create_context_from_native_context(native_context)
             .unwrap()
     };
+    let surfman = Surfman::new(device, context);
 
     let gl_type = match window.gl().get_type() {
         gleam::gl::GlType::Gl => sparkle::gl::GlType::Gl,
@@ -1055,8 +1056,7 @@ where
         image_handler,
         output_handler,
     } = WebGLComm::new(
-        device,
-        context,
+        surfman,
         window.gl(),
         webrender_api_sender,
         webvr_compositor.map(|compositor| compositor as Box<_>),

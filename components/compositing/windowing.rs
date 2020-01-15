@@ -19,9 +19,9 @@ use std::fmt::{Debug, Error, Formatter};
 use std::rc::Rc;
 use std::time::Duration;
 use style_traits::DevicePixel;
-use surfman::platform::default::context::NativeContext;
 use surfman::Adapter;
 use surfman::Connection;
+use surfman::platform::default::context::NativeContext;
 
 use webrender_api::units::DevicePoint;
 use webrender_api::units::{DeviceIntPoint, DeviceIntRect, DeviceIntSize};
@@ -149,6 +149,9 @@ pub enum AnimationState {
     Animating,
 }
 
+// TODO: this trait assumes that the window is responsible
+// for creating the GL context, making it current, buffer
+// swapping, etc. Really that should all be done by surfman.
 pub trait WindowMethods {
     /// Presents the window to the screen (perhaps by page flipping).
     fn present(&self);
@@ -175,7 +178,7 @@ pub trait WindowMethods {
     /// Get the surfman adapter
     fn get_surfman_adapter(&self) -> Adapter;
     /// Get the native context
-    /// TODO: duplication between this and `get_gl_context`?
+    // TODO: duplication between this and `get_gl_context`?
     fn get_native_context(&self) -> NativeContext;
 }
 
