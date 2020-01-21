@@ -20,6 +20,7 @@ use surfman::NativeWidget;
 use surfman::SurfaceAccess;
 use surfman::SurfaceType;
 use surfman::Surface;
+use surfman::SurfaceInfo;
 use surfman::SurfaceTexture;
 use webrender_api::units::TexelRect;
 
@@ -170,19 +171,13 @@ pub struct WebrenderSurfman(Rc<WebrenderSurfmanData>);
 
 struct WebrenderSurfmanData {
     device: Device,
-    mutable: RefCell<WebrenderSurfmanMutable>,
-}
-
-struct WebrenderSurfmanMutable {
-    context: Context,
-    render_surface: Surface,
+    context: RefCell<Context>,
 }
 
 impl Drop for WebrenderSurfmanData {
     fn drop(&mut self) {
-        let ref mut mutable = *self.mutable.borrow_mut();
-        let _ = self.device.destroy_surface(&mut mutable.context, &mut mutable.render_surface);
-        let _ = self.device.destroy_context(&mut mutable.context);
+        let ref mut context = *self.context.borrow_mut();
+        let _ = self.device.destroy_context(context);
     }
 }
 
@@ -190,37 +185,51 @@ impl WebrenderSurfman {
     pub fn create(connection: &Connection, adapter: &Adapter, context_attributes: ContextAttributes, native_widget: NativeWidget) -> Result<Self, Error> {
         let mut device = connection.create_device(&adapter)?;
 	let context_descriptor = device.create_context_descriptor(&context_attributes)?;
-        let context = device.create_context(&context_descriptor)?;
+        let mut context = device.create_context(&context_descriptor)?;
         let surface_access = SurfaceAccess::GPUOnly;
         let surface_type = SurfaceType::Widget { native_widget };
-	let render_surface = device.create_surface(&context, surface_access, surface_type)?;
-	let mutable = RefCell::new(WebrenderSurfmanMutable { context, render_surface });
-        Ok(WebrenderSurfman(Rc::new(WebrenderSurfmanData { device, mutable })))
+	let surface = device.create_surface(&context, surface_access, surface_type)?;
+        device.bind_surface_to_context(&mut context, surface).map_err(|(err, mut surface)| {
+	    let _ = device.destroy_surface(&mut context, &mut surface);
+	    err
+	})?;
+	let context = RefCell::new(context);
+        Ok(WebrenderSurfman(Rc::new(WebrenderSurfmanData { device, context })))
     }
 
     pub fn create_surface_texture(&self, surface: Surface) -> Result<SurfaceTexture, (Error, Surface)> {
-        let mut mutable = self.0.mutable.borrow_mut();
-        self.0.device.create_surface_texture(&mut mutable.context, surface)
+        let ref mut context = self.0.context.borrow_mut();
+        self.0.device.create_surface_texture(context, surface)
     }
 
     pub fn destroy_surface_texture(&self, surface_texture: SurfaceTexture) -> Result<Surface, (Error, SurfaceTexture)> {
-        let mut mutable = self.0.mutable.borrow_mut();
-        self.0.device.destroy_surface_texture(&mut mutable.context, surface_texture)
+        let ref mut context = self.0.context.borrow_mut();
+        self.0.device.destroy_surface_texture(context, surface_texture)
     }
 
     pub fn make_gl_context_current(&self) -> Result<(), Error> {
-        let mutable = self.0.mutable.borrow();
-        self.0.device.make_context_current(&mutable.context)
+        let ref context = self.0.context.borrow();
+        self.0.device.make_context_current(context)
     }
 
     pub fn present(&self) -> Result<(), Error> {
-        let ref mut mutable = *self.0.mutable.borrow_mut();
-        self.0.device.present_surface(&mutable.context, &mut mutable.render_surface)
+        let ref mut context = self.0.context.borrow_mut();
+        let mut surface = self.0.device.unbind_surface_from_context(context)?.unwrap();
+        self.0.device.present_surface(context, &mut surface)?;
+        self.0.device.bind_surface_to_context(context, surface).map_err(|(err, mut surface)| {
+	    let _ = self.0.device.destroy_surface(context, &mut surface);
+	    err
+	})
+    }
+
+    pub fn context_surface_info(&self) -> Result<Option<SurfaceInfo>, Error> {
+        let ref context = self.0.context.borrow();
+        self.0.device.context_surface_info(context)
     }
 
     pub fn get_proc_address(&self, name: &str) -> *const c_void {
-        let mutable = self.0.mutable.borrow();
-	self.0.device.get_proc_address(&mutable.context, name)
+        let ref context = self.0.context.borrow();
+	self.0.device.get_proc_address(context, name)
     }
 
     pub fn device(&self) -> &Device {

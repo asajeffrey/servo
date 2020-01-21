@@ -1253,6 +1253,23 @@ enum CompositeTarget {
         let size = self.embedder_coordinates.framebuffer.to_u32();
 
         self.webrender_surfman.make_gl_context_current().unwrap();
+	debug_assert_eq!(
+	    self.webrender_gl.get_error(),
+	    gleam::gl::NO_ERROR
+	);
+	
+        // Bind the webrender framebuffer
+        let framebuffer_object = self.webrender_surfman
+	    .context_surface_info()
+	    .unwrap()
+	    .map(|info| info.framebuffer_object)
+	    .unwrap_or(0);
+        self.webrender_gl.bind_framebuffer(gleam::gl::FRAMEBUFFER, framebuffer_object);
+	debug_assert_eq!(
+	    (self.webrender_gl.get_error(), self.webrender_gl.check_frame_buffer_status(gleam::gl::FRAMEBUFFER)),
+	    (gleam::gl::NO_ERROR, gleam::gl::FRAMEBUFFER_COMPLETE)
+	);
+
         self.webrender.update();
 
         let wait_for_stable_image = match target {
@@ -1441,10 +1458,18 @@ enum CompositeTarget {
 
     fn clear_background(&self) {
         let gl = &self.webrender_gl;
+	debug_assert_eq!(
+	    (gl.get_error(), gl.check_frame_buffer_status(gleam::gl::FRAMEBUFFER)),
+	    (gleam::gl::NO_ERROR, gleam::gl::FRAMEBUFFER_COMPLETE)
+	);
 
         // Make framebuffer fully transparent.
         gl.clear_color(0.0, 0.0, 0.0, 0.0);
         gl.clear(gleam::gl::COLOR_BUFFER_BIT);
+	debug_assert_eq!(
+	    (gl.get_error(), gl.check_frame_buffer_status(gleam::gl::FRAMEBUFFER)),
+	    (gleam::gl::NO_ERROR, gleam::gl::FRAMEBUFFER_COMPLETE)
+	);
 
         // Make the viewport white.
         let viewport = self.embedder_coordinates.get_flipped_viewport();
@@ -1458,6 +1483,10 @@ enum CompositeTarget {
         gl.enable(gleam::gl::SCISSOR_TEST);
         gl.clear(gleam::gl::COLOR_BUFFER_BIT);
         gl.disable(gleam::gl::SCISSOR_TEST);
+	debug_assert_eq!(
+	    (gl.get_error(), gl.check_frame_buffer_status(gleam::gl::FRAMEBUFFER)),
+	    (gleam::gl::NO_ERROR, gleam::gl::FRAMEBUFFER_COMPLETE)
+	);
     }
 
     fn get_root_pipeline_id(&self) -> Option<PipelineId> {

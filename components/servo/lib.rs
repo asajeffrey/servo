@@ -343,6 +343,22 @@ where
 
         // Make sure the gl context is made current.
         webrender_surfman.make_gl_context_current().unwrap();
+	debug_assert_eq!(
+	    webrender_gl.get_error(),
+	    gleam::gl::NO_ERROR,
+	);
+
+        // Bind the webrender framebuffer
+        let framebuffer_object = webrender_surfman
+	    .context_surface_info()
+	    .unwrap()
+	    .map(|info| info.framebuffer_object)
+	    .unwrap_or(0);
+        webrender_gl.bind_framebuffer(gleam::gl::FRAMEBUFFER, framebuffer_object);
+	debug_assert_eq!(
+	    (webrender_gl.get_error(), webrender_gl.check_frame_buffer_status(gleam::gl::FRAMEBUFFER)),
+	    (gleam::gl::NO_ERROR, gleam::gl::FRAMEBUFFER_COMPLETE)
+	);
 
         // Reserving a namespace to create TopLevelBrowserContextId.
         PipelineNamespace::install(PipelineNamespaceId(0));
