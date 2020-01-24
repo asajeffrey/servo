@@ -431,7 +431,7 @@ impl WebGLThread {
         let context_descriptor = self
             .device
             .create_context_descriptor(&context_attributes)
-            .unwrap();
+            .expect("Failed to create context descriptor");
 
         let safe_size = Size2D::new(
             requested_size.width.min(SAFE_VIEWPORT_DIMS[0]).max(1),
