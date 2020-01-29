@@ -28,8 +28,8 @@ use std::rc::Rc;
 use surfman::Adapter;
 use surfman::Connection;
 use surfman::ContextAttributes;
+use surfman::Device;
 use surfman::NativeWidget;
-use surfman::platform::default::context::NativeContext;
 
 #[cfg(any(target_os = "linux", target_os = "macos"))]
 struct HeadlessContext {
@@ -197,11 +197,7 @@ impl WindowMethods for Window {
 }
 
 impl webxr::glwindow::GlWindow for Window {
-    fn native_widget(&self) -> NativeWidget {
-        unimplemented!()
-    }
-
-    fn native_context(&self) -> NativeContext {
+    fn create_native_widget(&self, device: &Device) -> NativeWidget {
         unimplemented!()
     }
 

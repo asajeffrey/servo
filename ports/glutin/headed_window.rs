@@ -41,10 +41,10 @@ use std::rc::Rc;
 use surfman::Connection;
 use surfman::ContextAttributes;
 use surfman::ContextAttributeFlags;
+use surfman::Device;
 use surfman::GLVersion;
 use surfman::Adapter;
 use surfman::NativeWidget;
-use surfman::platform::default::context::NativeContext;
 #[cfg(target_os = "windows")]
 use winapi;
 
@@ -529,11 +529,7 @@ impl WindowPortsMethods for Window {
 }
 
 impl webxr::glwindow::GlWindow for Window {
-    fn native_widget(&self) -> NativeWidget {
-        unimplemented!()
-    }
-
-    fn native_context(&self) -> NativeContext {
+    fn create_native_widget(&self, device: &Device) -> NativeWidget {
         unimplemented!()
     }
 
