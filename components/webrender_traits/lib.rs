@@ -98,7 +98,7 @@ impl WebrenderExternalImageHandlers {
     }
 }
 
-impl webrender_api::ExternalImageHandler for WebrenderExternalImageHandlers {
+impl webrender::ExternalImageHandler for WebrenderExternalImageHandlers {
     /// Lock the external image. Then, WR could start to read the
     /// image content.
     /// The WR client should not change the image content until the
@@ -108,7 +108,7 @@ impl webrender_api::ExternalImageHandler for WebrenderExternalImageHandlers {
         key: webrender_api::ExternalImageId,
         _channel_index: u8,
         _rendering: webrender_api::ImageRendering,
-    ) -> webrender_api::ExternalImage {
+    ) -> webrender::ExternalImage {
         let external_images = self.external_images.lock().unwrap();
         let handler_type = external_images
             .get(&key)
@@ -129,9 +129,9 @@ impl webrender_api::ExternalImageHandler for WebrenderExternalImageHandlers {
                 )
             },
         };
-        webrender_api::ExternalImage {
+        webrender::ExternalImage {
             uv,
-            source: webrender_api::ExternalImageSource::NativeTexture(texture_id),
+            source: webrender::ExternalImageSource::NativeTexture(texture_id),
         }
     }
 

@@ -182,10 +182,7 @@ pub struct InitialPipelineState {
     pub prev_visibility: bool,
 
     /// Webrender api.
-    pub webrender_image_api_sender: net_traits::WebrenderIpcSender,
-
-    /// Webrender api.
-    pub webrender_api_sender: script_traits::WebrenderIpcSender,
+    pub webrender_api_sender: webrender_api::RenderApiSender,
 
     /// The ID of the document processed by this script thread.
     pub webrender_document: webrender_api::DocumentId,
@@ -301,7 +298,6 @@ impl Pipeline {
                     pipeline_port: pipeline_port,
                     pipeline_namespace_id: state.pipeline_namespace_id,
                     webrender_api_sender: state.webrender_api_sender,
-                    webrender_image_api_sender: state.webrender_image_api_sender,
                     webrender_document: state.webrender_document,
                     webgl_chan: state.webgl_chan,
                     webvr_chan: state.webvr_chan,
@@ -507,8 +503,7 @@ pub struct UnprivilegedPipelineContent {
     prefs: HashMap<String, PrefValue>,
     pipeline_port: IpcReceiver<LayoutControlMsg>,
     pipeline_namespace_id: PipelineNamespaceId,
-    webrender_api_sender: script_traits::WebrenderIpcSender,
-    webrender_image_api_sender: net_traits::WebrenderIpcSender,
+    webrender_api_sender: webrender_api::RenderApiSender,
     webrender_document: webrender_api::DocumentId,
     webgl_chan: Option<WebGLPipeline>,
     webvr_chan: Option<IpcSender<WebVRMsg>>,
@@ -530,7 +525,7 @@ impl UnprivilegedPipelineContent {
         // Idempotent in single-process mode.
         PipelineNamespace::set_installer_sender(self.namespace_request_sender);
 
-        let image_cache = Arc::new(ImageCacheImpl::new(self.webrender_image_api_sender.clone()));
+        let image_cache = Arc::new(ImageCacheImpl::new(self.webrender_api_sender.create_api()));
         let paint_time_metrics = PaintTimeMetrics::new(
             self.id,
             self.time_profiler_chan.clone(),

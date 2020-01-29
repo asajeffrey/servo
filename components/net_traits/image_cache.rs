@@ -5,7 +5,6 @@
 use crate::image::base::{Image, ImageMetadata};
 use crate::request::CorsSettings;
 use crate::FetchResponseMsg;
-use crate::WebrenderIpcSender;
 use ipc_channel::ipc::IpcSender;
 use servo_url::{ImmutableOrigin, ServoUrl};
 use std::sync::Arc;
@@ -102,7 +101,7 @@ pub enum UsePlaceholder {
 // ======================================================================
 
 pub trait ImageCache: Sync + Send {
-    fn new(webrender_api: WebrenderIpcSender) -> Self
+    fn new(webrender_api: webrender_api::RenderApi) -> Self
     where
         Self: Sized;
 

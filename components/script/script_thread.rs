@@ -143,7 +143,7 @@ use script_traits::{MediaSessionActionType, MouseButton, MouseEventType, NewLayo
 use script_traits::{Painter, ProgressiveWebMetricType, ScriptMsg, ScriptThreadFactory};
 use script_traits::{ScriptToConstellationChan, TimerSchedulerMsg};
 use script_traits::{TouchEventType, TouchId, UntrustedNodeAddress, WheelDelta};
-use script_traits::{UpdatePipelineIdReason, WebrenderIpcSender, WindowSizeData, WindowSizeType};
+use script_traits::{UpdatePipelineIdReason, WindowSizeData, WindowSizeType};
 use servo_atoms::Atom;
 use servo_url::{ImmutableOrigin, MutableOrigin, ServoUrl};
 use std::borrow::Cow;
@@ -165,7 +165,7 @@ use style::thread_state::{self, ThreadState};
 use time::{at_utc, get_time, precise_time_ns, Timespec};
 use url::Position;
 use webrender_api::units::LayoutPixel;
-use webrender_api::DocumentId;
+use webrender_api::{DocumentId, RenderApiSender};
 use webvr_traits::{WebVREvent, WebVRMsg};
 
 pub type ImageCacheMsg = (PipelineId, PendingImageResponse);
@@ -653,7 +653,7 @@ pub struct ScriptThread {
     webrender_document: DocumentId,
 
     /// Webrender API sender.
-    webrender_api_sender: WebrenderIpcSender,
+    webrender_api_sender: RenderApiSender,
 
     /// Periodically print out on which events script threads spend their processing time.
     profile_script_events: bool,

@@ -102,7 +102,7 @@ use script_traits::serializable::BlobImpl;
 use script_traits::transferable::MessagePortImpl;
 use script_traits::{DocumentActivity, DrawAPaintImageResult};
 use script_traits::{MediaSessionActionType, ScriptToConstellationChan, TimerEventId, TimerSource};
-use script_traits::{UntrustedNodeAddress, WebrenderIpcSender, WindowSizeData, WindowSizeType};
+use script_traits::{UntrustedNodeAddress, WindowSizeData, WindowSizeType};
 use selectors::matching::ElementSelectorFlags;
 use serde::{Deserialize, Serialize};
 use servo_arc::Arc as ServoArc;
@@ -154,7 +154,7 @@ use uuid::Uuid;
 use webgpu::{
     WebGPU, WebGPUAdapter, WebGPUBindGroupLayout, WebGPUBuffer, WebGPUDevice, WebGPUPipelineLayout,
 };
-use webrender_api::{DocumentId, ImageKey};
+use webrender_api::{DocumentId, ImageKey, RenderApiSender};
 use webvr_traits::{WebVRGamepadData, WebVRGamepadHand, WebVRGamepadState};
 use webxr_api::SwapChainId as WebXRSwapChainId;
 
@@ -558,6 +558,7 @@ unsafe_no_jsmanaged_fields!(Arc<Mutex<dyn Player>>);
 unsafe_no_jsmanaged_fields!(WebRtcController);
 unsafe_no_jsmanaged_fields!(MediaStreamId, MediaStreamType);
 unsafe_no_jsmanaged_fields!(Mutex<MediaFrameRenderer>);
+unsafe_no_jsmanaged_fields!(RenderApiSender);
 unsafe_no_jsmanaged_fields!(ResourceFetchTiming);
 unsafe_no_jsmanaged_fields!(Timespec);
 unsafe_no_jsmanaged_fields!(HTMLMediaElementFetchContext);
@@ -571,7 +572,6 @@ unsafe_no_jsmanaged_fields!(WebGLContextId);
 unsafe_no_jsmanaged_fields!(Arc<Mutex<dyn AudioRenderer>>);
 unsafe_no_jsmanaged_fields!(MediaSessionActionType);
 unsafe_no_jsmanaged_fields!(MediaMetadata);
-unsafe_no_jsmanaged_fields!(WebrenderIpcSender);
 unsafe_no_jsmanaged_fields!(StreamConsumer);
 
 unsafe impl<'a> JSTraceable for &'a str {

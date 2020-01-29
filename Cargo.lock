@@ -306,9 +306,9 @@ dependencies = [
 
 [[package]]
 name = "bitflags"
-version = "1.2.1"
+version = "1.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "cf1de2fe8c75bc145a2f577add951f8134889b4795d47466a54a5c846d691693"
+checksum = "3d155346769a6855b86399e9bc3814ab343cd3d62c7e985113d46a0ec3c281fd"
 
 [[package]]
 name = "blake2b_simd"
@@ -4029,7 +4029,7 @@ dependencies = [
 [[package]]
 name = "peek-poke"
 version = "0.2.0"
-source = "git+https://github.com/servo/webrender#edac864107cf43732ec66a9d3288e869a70ce1de"
+source = "git+https://github.com/servo/webrender#4f2d78adb6e07e3e5ab2da9765613ecf9e07eee0"
 dependencies = [
  "euclid",
  "peek-poke-derive 0.2.1",
@@ -4056,7 +4056,7 @@ dependencies = [
 [[package]]
 name = "peek-poke-derive"
 version = "0.2.1"
-source = "git+https://github.com/servo/webrender#edac864107cf43732ec66a9d3288e869a70ce1de"
+source = "git+https://github.com/servo/webrender#4f2d78adb6e07e3e5ab2da9765613ecf9e07eee0"
 dependencies = [
  "proc-macro2 1.0.1",
  "quote 1.0.2",
@@ -4874,7 +4874,6 @@ dependencies = [
  "ipc-channel",
  "keyboard-types",
  "libc",
- "log",
  "malloc_size_of",
  "malloc_size_of_derive",
  "media",
@@ -4934,9 +4933,9 @@ checksum = "388a1df253eca08550bef6c72392cfe7c30914bf41df5269b68cbd6ff8f570a3"
 
 [[package]]
 name = "serde"
-version = "1.0.103"
+version = "1.0.88"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1217f97ab8e8904b57dd22eb61cde455fa7446a9c1cf43966066da047c1f3702"
+checksum = "9f301d728f2b94c9a7691c90f07b0b4e8a4517181d9461be94c04bddeb4bd850"
 dependencies = [
  "serde_derive",
 ]
@@ -4952,13 +4951,13 @@ dependencies = [
 
 [[package]]
 name = "serde_derive"
-version = "1.0.103"
+version = "1.0.88"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a8c6faef9a2e64b0064f48570289b4bf8823b7581f1d6157c1b52152306651d0"
+checksum = "beed18e6f5175aef3ba670e57c60ef3b1b74d250d962a26604bff4c80e970dd4"
 dependencies = [
- "proc-macro2 1.0.1",
- "quote 1.0.2",
- "syn 1.0.3",
+ "proc-macro2 0.4.26",
+ "quote 0.6.12",
+ "syn 0.15.39",
 ]
 
 [[package]]
@@ -6623,7 +6622,7 @@ dependencies = [
 [[package]]
 name = "webrender"
 version = "0.60.0"
-source = "git+https://github.com/servo/webrender#edac864107cf43732ec66a9d3288e869a70ce1de"
+source = "git+https://github.com/servo/webrender#4f2d78adb6e07e3e5ab2da9765613ecf9e07eee0"
 dependencies = [
  "base64",
  "bincode",
@@ -6664,7 +6663,7 @@ dependencies = [
 [[package]]
 name = "webrender_api"
 version = "0.60.0"
-source = "git+https://github.com/servo/webrender#edac864107cf43732ec66a9d3288e869a70ce1de"
+source = "git+https://github.com/servo/webrender#4f2d78adb6e07e3e5ab2da9765613ecf9e07eee0"
 dependencies = [
  "app_units",
  "bitflags",
@@ -6673,6 +6672,7 @@ dependencies = [
  "core-graphics 0.17.3",
  "derive_more 0.13.0",
  "euclid",
+ "ipc-channel",
  "malloc_size_of_derive",
  "peek-poke 0.2.0 (git+https://github.com/servo/webrender)",
  "serde",
@@ -6685,7 +6685,7 @@ dependencies = [
 [[package]]
 name = "webrender_build"
 version = "0.0.1"
-source = "git+https://github.com/servo/webrender#edac864107cf43732ec66a9d3288e869a70ce1de"
+source = "git+https://github.com/servo/webrender#4f2d78adb6e07e3e5ab2da9765613ecf9e07eee0"
 dependencies = [
  "sha2",
 ]
@@ -6695,6 +6695,7 @@ name = "webrender_traits"
 version = "0.0.1"
 dependencies = [
  "euclid",
+ "webrender",
  "webrender_api",
 ]
 
@@ -6878,7 +6879,7 @@ dependencies = [
 [[package]]
 name = "wr_malloc_size_of"
 version = "0.0.1"
-source = "git+https://github.com/servo/webrender#edac864107cf43732ec66a9d3288e869a70ce1de"
+source = "git+https://github.com/servo/webrender#4f2d78adb6e07e3e5ab2da9765613ecf9e07eee0"
 dependencies = [
  "app_units",
  "euclid",
