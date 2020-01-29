@@ -521,8 +521,8 @@ dependencies = [
  "raqote",
  "servo_config",
  "sparkle",
- "surfman 0.1.3",
- "surfman-chains 0.2.1",
+ "surfman",
+ "surfman-chains",
  "surfman-chains-api",
  "webrender",
  "webrender_api",
@@ -789,6 +789,7 @@ dependencies = [
  "toml",
  "webrender",
  "webrender_api",
+ "webrender_traits",
  "webvr_traits",
  "webxr",
 ]
@@ -3143,7 +3144,7 @@ dependencies = [
  "sparkle",
  "style",
  "style_traits",
- "surfman 0.1.3",
+ "surfman",
  "webdriver_server",
  "webgpu",
  "webrender",
@@ -4995,7 +4996,6 @@ dependencies = [
  "euclid",
  "getopts",
  "gleam 0.6.18",
- "glutin",
  "image",
  "keyboard-types",
  "lazy_static",
@@ -5008,10 +5008,12 @@ dependencies = [
  "servo-media",
  "shellwords",
  "sig",
+ "surfman",
  "tinyfiledialogs",
  "webxr",
  "webxr-api",
  "winapi",
+ "winit",
  "winres",
 ]
 
@@ -5075,8 +5077,8 @@ dependencies = [
  "log",
  "servo-media",
  "sparkle",
- "surfman 0.2.0",
- "surfman-chains 0.3.0",
+ "surfman",
+ "surfman-chains",
  "surfman-chains-api",
 ]
 
@@ -5743,34 +5745,6 @@ dependencies = [
 
 [[package]]
 name = "surfman"
-version = "0.1.3"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "10248da202c1c8d8798783bbc4ba08e81ff225c6e2a394d64748d2a62acb198c"
-dependencies = [
- "bitflags",
- "cgl 0.3.2",
- "cocoa 0.19.1",
- "core-foundation 0.6.4",
- "core-graphics 0.17.3",
- "display-link",
- "euclid",
- "gl_generator 0.11.0",
- "io-surface",
- "lazy_static",
- "libc",
- "log",
- "mach 0.3.2",
- "objc",
- "osmesa-sys",
- "wayland-sys 0.24.0",
- "winapi",
- "winit",
- "wio",
- "x11",
-]
-
-[[package]]
-name = "surfman"
 version = "0.2.0"
 source = "git+https://github.com/asajeffrey/surfman?branch=multi-egl-context-attributes#8eadceda804298d98b919b9ce1dd026a190d4363"
 dependencies = [
@@ -5798,20 +5772,6 @@ dependencies = [
 
 [[package]]
 name = "surfman-chains"
-version = "0.2.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a2c1b5976b229a807a9e79b3b5248da577948b9882c77f2afce27cf562f80e22"
-dependencies = [
- "euclid",
- "fnv",
- "log",
- "sparkle",
- "surfman 0.1.3",
- "surfman-chains-api",
-]
-
-[[package]]
-name = "surfman-chains"
 version = "0.3.0"
 source = "git+https://github.com/asajeffrey/surfman-chains?branch=multi#80a71b1a2df71ae70c3c194d0af40b8ebf72968a"
 dependencies = [
@@ -5819,7 +5779,7 @@ dependencies = [
  "fnv",
  "log",
  "sparkle",
- "surfman 0.2.0",
+ "surfman",
  "surfman-chains-api",
 ]
 
@@ -6696,6 +6656,8 @@ name = "webrender_traits"
 version = "0.0.1"
 dependencies = [
  "euclid",
+ "servo_geometry",
+ "surfman",
  "webrender_api",
 ]
 
@@ -6730,7 +6692,7 @@ dependencies = [
 [[package]]
 name = "webxr"
 version = "0.0.1"
-source = "git+https://github.com/servo/webxr#33072cbbb67ff14b5938e886ee11a13f4cf2bafc"
+source = "git+https://github.com/asajeffrey/webxr?branch=surfmanup#20fdd2ee0ccd091c9c9ba021362362b3e833ec3b"
 dependencies = [
  "bindgen",
  "euclid",
@@ -6740,8 +6702,8 @@ dependencies = [
  "log",
  "openxr",
  "serde",
- "surfman 0.1.3",
- "surfman-chains 0.2.1",
+ "surfman",
+ "surfman-chains",
  "time",
  "webxr-api",
  "winapi",
@@ -6751,7 +6713,7 @@ dependencies = [
 [[package]]
 name = "webxr-api"
 version = "0.0.1"
-source = "git+https://github.com/servo/webxr#33072cbbb67ff14b5938e886ee11a13f4cf2bafc"
+source = "git+https://github.com/asajeffrey/webxr?branch=surfmanup#20fdd2ee0ccd091c9c9ba021362362b3e833ec3b"
 dependencies = [
  "euclid",
  "ipc-channel",

@@ -20,7 +20,7 @@ use rust_webvr::VRServiceManager;
 use webrender_api::units::DevicePoint;
 use webrender_api::units::{DeviceIntPoint, DeviceIntRect, DeviceIntSize};
 use webrender_api::ScrollLocation;
-use webvr::VRServiceManager;
+use webrender_traits::WebrenderSurfman;
 use webvr_traits::WebVRMainThreadHeartbeat;
 
 #[derive(Clone)]
