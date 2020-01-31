@@ -66,7 +66,7 @@ impl WebGLComm {
             None
         };
 
-        let external = WebGLExternalImages::new(surfman, webrender_gl, webrender_swap_chains);
+        let external = WebGLExternalImages::new(surfman, webrender_swap_chains);
 
         WebGLThread::run_on_own_thread(init);
 
@@ -82,20 +82,17 @@ impl WebGLComm {
 /// Bridge between the webrender::ExternalImage callbacks and the WebGLThreads.
 struct WebGLExternalImages {
     surfman: WebrenderSurfman,
-    webrender_gl: Rc<dyn gleam::gl::Gl>,
     swap_chains: SwapChains<WebGLContextId, Device>,
-    locked_front_buffers: FnvHashMap<WebGLContextId, (SurfaceTexture, Option<u32>)>,
+    locked_front_buffers: FnvHashMap<WebGLContextId, SurfaceTexture>,
 }
 
 impl WebGLExternalImages {
     fn new(
         surfman: WebrenderSurfman,
-        webrender_gl: Rc<dyn gleam::gl::Gl>,
         swap_chains: SwapChains<WebGLContextId, Device>,
     ) -> Self {
         Self {
             surfman,
-            webrender_gl,
             swap_chains,
             locked_front_buffers: FnvHashMap::default(),
         }
@@ -116,77 +113,16 @@ impl WebGLExternalImages {
             .unwrap();
         let gl_texture = self.surfman.device().surface_texture_object(&front_buffer_texture);
 
-        // THE HORROR THE HORROR
-        let workaround_texture = self.webrender_gl.gen_textures(1)[0];
-        let read_fbo = self.webrender_gl.gen_framebuffers(1)[0];
-        let draw_fbo = self.webrender_gl.gen_framebuffers(1)[0];
-        self.webrender_gl.bind_texture(gl::TEXTURE_2D, workaround_texture);
-        self.webrender_gl.bind_framebuffer(gl::DRAW_FRAMEBUFFER, draw_fbo);
-        self.webrender_gl.bind_framebuffer(gl::READ_FRAMEBUFFER, read_fbo);
-        self.webrender_gl.tex_image_2d(gl::TEXTURE_2D, 0, gl::RGBA as i32, size.width, size.height, 0, gl::RGBA, gl::UNSIGNED_BYTE, None);
-        self.webrender_gl.framebuffer_texture_2d(
-            gl::READ_FRAMEBUFFER,
-            gl::COLOR_ATTACHMENT0,
-            self.surfman.device().surface_gl_texture_target(),
-            gl_texture,
-            0,
-        );
-        self.webrender_gl.framebuffer_texture_2d(
-            gl::DRAW_FRAMEBUFFER,
-            gl::COLOR_ATTACHMENT0,
-            gl::TEXTURE_2D,
-            workaround_texture,
-            0,
-        );
-        self.webrender_gl.clear_color(0.2, 0.3, 0.3, 1.0);
-        self.webrender_gl.clear(gl::COLOR_BUFFER_BIT);
-        debug_assert_eq!(self.webrender_gl.get_error(), gl::NO_ERROR);
+        self.locked_front_buffers.insert(id, front_buffer_texture);
 
-        // self.webrender_gl.blit_framebuffer(
-        //     0,
-        //     0,
-        //     size.width,
-        //     size.height,
-        //     0,
-        //     0,
-        //     size.width,
-        //     size.height,
-        //     gl::COLOR_BUFFER_BIT,
-        //     gl::NEAREST,
-        // );
-
-        debug_assert_eq!(self.webrender_gl.get_error(), gl::NO_ERROR);
-        debug!("Pixel data {:?}", {
-            self.webrender_gl.framebuffer_texture_2d(
-                gl::READ_FRAMEBUFFER,
-                gl::COLOR_ATTACHMENT0,
-                gl::TEXTURE_2D,
-                workaround_texture,
-                0,
-            );
-            self.webrender_gl.read_pixels(0, 0, 4, 4, gl::RGBA, gl::UNSIGNED_BYTE)
-        });
-
-        self.webrender_gl.bind_framebuffer(gl::DRAW_FRAMEBUFFER, 0);
-        self.webrender_gl.bind_framebuffer(gl::READ_FRAMEBUFFER, 0);
-        self.webrender_gl.delete_framebuffers(&[draw_fbo, read_fbo]);
-        debug_assert_eq!(self.webrender_gl.get_error(), gl::NO_ERROR);
-
-        self.locked_front_buffers.insert(id, (front_buffer_texture, Some(workaround_texture)));
-
-        Some((workaround_texture, size))
+        Some((gl_texture, size))
     }
 
     fn unlock_swap_chain(&mut self, id: WebGLContextId) -> Option<()> {
-        let (locked_front_buffer, workaround_texture) = self.locked_front_buffers.remove(&id)?;
+        let locked_front_buffer = self.locked_front_buffers.remove(&id)?;
         let locked_front_buffer = self.surfman
             .destroy_surface_texture(locked_front_buffer)
             .unwrap();
-
-        if let Some(workaround_texture) = workaround_texture {
-            self.webrender_gl.delete_textures(&[workaround_texture]);
-            debug_assert_eq!(self.webrender_gl.get_error(), gl::NO_ERROR);
-        }
 
         debug!("... unlocked chain {:?}", id);
         self.swap_chains

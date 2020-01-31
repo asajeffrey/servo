@@ -26,6 +26,7 @@ use servo::servo_config::{pref, set_pref};
 use servo::servo_url::ServoUrl;
 use servo::webrender_api::units::DevicePixel;
 use servo::webrender_api::ScrollLocation;
+use servo::webrender_traits::WebrenderSurfman;
 use servo::webvr::{VRExternalShmemPtr, VRMainThreadHeartbeat, VRService, VRServiceManager};
 use servo::{self, gl, BrowserId, Servo};
 use servo_media::player::context as MediaPlayerContext;
@@ -690,19 +691,8 @@ impl EmbedderMethods for ServoEmbedderCallbacks {
 }
 
 impl WindowMethods for ServoWindowCallbacks {
-    fn make_gl_context_current(&self) {
-        debug!("WindowMethods::prepare_for_composite");
-        self.host_callbacks.make_current();
-    }
-
-    fn present(&self) {
-        debug!("WindowMethods::present");
-        self.host_callbacks.flush();
-    }
-
-    fn gl(&self) -> Rc<dyn gl::Gl> {
-        debug!("WindowMethods::gl");
-        self.gl.clone()
+    fn webrender_surfman(&self) -> WebrenderSurfman {
+        unimplemented!()
     }
 
     fn set_animation_state(&self, state: AnimationState) {

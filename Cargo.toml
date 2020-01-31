@@ -41,3 +41,5 @@ surfman = { git = "https://github.com/asajeffrey/surfman", branch = "servo-surfm
 [patch."https://github.com/servo/webxr"]
 webxr-api = {git = "https://github.com/asajeffrey/webxr", branch = "surfmanup"}
 webxr = {git = "https://github.com/asajeffrey/webxr", branch = "surfmanup"}
+# webxr-api = {path="../webxr/webxr-api"}
+# webxr = {path="../webxr/webxr"}
