@@ -86,19 +86,19 @@
   <ItemDefinitionGroup Condition="'$(Configuration)'=='Debug'">
     <ClCompile>
       <PreprocessorDefinitions>_DEBUG;%(PreprocessorDefinitions)</PreprocessorDefinitions>
-      <AdditionalIncludeDirectories Condition="'$(Configuration)|$(Platform)'=='Debug|ARM64'">$(ProjectDir);$(GeneratedFilesDir);$(IntDir);%(AdditionalIncludeDirectories);$(ProjectDir)\..\..\..\target\aarch64-uwp-windows-msvc\debug\</AdditionalIncludeDirectories>
-      <AdditionalIncludeDirectories Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">$(ProjectDir);$(GeneratedFilesDir);$(IntDir);%(AdditionalIncludeDirectories);$(ProjectDir)\..\..\..\target\x86_64-uwp-windows-msvc\debug\</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories Condition="'$(Configuration)|$(Platform)'=='Debug|ARM64'">$(ProjectDir);$(GeneratedFilesDir);$(IntDir);%(AdditionalIncludeDirectories);$(ProjectDir)\..\..\..\target\aarch64-uwp-windows-msvc\debug\;$(ProjectDir)\..\..\..\..\ms-angle\include</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">$(ProjectDir);$(GeneratedFilesDir);$(IntDir);%(AdditionalIncludeDirectories);$(ProjectDir)\..\..\..\target\x86_64-uwp-windows-msvc\debug\;$(ProjectDir)\..\..\..\..\ms-angle\include</AdditionalIncludeDirectories>
     </ClCompile>
     <Link>
-      <AdditionalDependencies Condition="'$(Configuration)|$(Platform)'=='Debug|ARM64'">WindowsApp.lib;%(AdditionalDependencies);simpleservo.dll.lib</AdditionalDependencies>
+      <AdditionalDependencies Condition="'$(Configuration)|$(Platform)'=='Debug|ARM64'">WindowsApp.lib;%(AdditionalDependencies);simpleservo.dll.lib;libEGL.lib;libGLESv2.lib</AdditionalDependencies>
       <AdditionalLibraryDirectories Condition="'$(Configuration)|$(Platform)'=='Debug|ARM64'">$(ProjectDir)\..\..\..\target\aarch64-uwp-windows-msvc\debug\</AdditionalLibraryDirectories>
       <AdditionalLibraryDirectories Condition="'$(Configuration)|$(Platform)'=='Debug|ARM64'">$(ProjectDir)\..\..\..\target\aarch64-uwp-windows-msvc\debug\deps</AdditionalLibraryDirectories>
     </Link>
     <Link />
     <Link>
-      <AdditionalDependencies Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">WindowsApp.lib;%(AdditionalDependencies);simpleservo.dll.lib</AdditionalDependencies>
+      <AdditionalDependencies Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">WindowsApp.lib;%(AdditionalDependencies);simpleservo.dll.lib;libEGL.lib;libGLESv2.lib</AdditionalDependencies>
       <AdditionalLibraryDirectories Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">$(ProjectDir)\..\..\..\target\x86_64-uwp-windows-msvc\debug\</AdditionalLibraryDirectories>
-      <AdditionalLibraryDirectories Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">$(ProjectDir)\..\..\..\target\x86_64-uwp-windows-msvc\debug\deps</AdditionalLibraryDirectories>
+      <AdditionalLibraryDirectories Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">$(ProjectDir)\..\..\..\target\x86_64-uwp-windows-msvc\debug\deps;$(ProjectDir)\..\..\..\..\ms-angle\winrt\10\src\Debug_x64\lib</AdditionalLibraryDirectories>
     </Link>
   </ItemDefinitionGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)'=='Release'">
@@ -148,6 +148,14 @@
     <AppxManifest Include="Package.appxmanifest">
       <SubType>Designer</SubType>
     </AppxManifest>
+    <None Include="..\..\..\..\ms-angle\winrt\10\src\Debug_x64\libEGL.dll">
+      <DeploymentContent Condition="'$(Configuration)|$(Platform)'=='Debug|ARM64'">true</DeploymentContent>
+      <DeploymentContent Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">true</DeploymentContent>
+    </None>
+    <None Include="..\..\..\..\ms-angle\winrt\10\src\Debug_x64\libGLESv2.dll">
+      <DeploymentContent Condition="'$(Configuration)|$(Platform)'=='Debug|ARM64'">true</DeploymentContent>
+      <DeploymentContent Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">true</DeploymentContent>
+    </None>
     <None Include="..\..\..\target\aarch64-uwp-windows-msvc\debug\avcodec-58.dll">
       <DeploymentContent Condition="'$(Configuration)|$(Platform)'=='Debug|ARM64'">true</DeploymentContent>
     </None>
@@ -948,7 +956,6 @@
   <ImportGroup Label="ExtensionTargets">
     <Import Project="..\packages\Microsoft.Windows.CppWinRT.2.0.190620.2\build\native\Microsoft.Windows.CppWinRT.targets" Condition="Exists('..\packages\Microsoft.Windows.CppWinRT.2.0.190620.2\build\native\Microsoft.Windows.CppWinRT.targets')" />
     <Import Project="..\packages\OpenXR.Loader.1.0.3\build\native\OpenXR.Loader.targets" Condition="Exists('..\packages\OpenXR.Loader.1.0.3\build\native\OpenXR.Loader.targets')" />
-    <Import Project="..\packages\ANGLE.WindowsStore.Servo.2.1.16\build\native\ANGLE.WindowsStore.Servo.targets" Condition="Exists('..\packages\ANGLE.WindowsStore.Servo.2.1.16\build\native\ANGLE.WindowsStore.Servo.targets')" />
   </ImportGroup>
   <Target Name="EnsureNuGetPackageBuildImports" BeforeTargets="PrepareForBuild">
     <PropertyGroup>
@@ -958,6 +965,5 @@
     <Error Condition="!Exists('..\packages\Microsoft.Windows.CppWinRT.2.0.190620.2\build\native\Microsoft.Windows.CppWinRT.targets')" Text="$([System.String]::Format('$(ErrorText)', '..\packages\Microsoft.Windows.CppWinRT.2.0.190620.2\build\native\Microsoft.Windows.CppWinRT.targets'))" />
     <Error Condition="!Exists('..\packages\OpenXR.Loader.1.0.3\build\native\OpenXR.Loader.props')" Text="$([System.String]::Format('$(ErrorText)', '..\packages\OpenXR.Loader.1.0.3\build\native\OpenXR.Loader.props'))" />
     <Error Condition="!Exists('..\packages\OpenXR.Loader.1.0.3\build\native\OpenXR.Loader.targets')" Text="$([System.String]::Format('$(ErrorText)', '..\packages\OpenXR.Loader.1.0.3\build\native\OpenXR.Loader.targets'))" />
-    <Error Condition="!Exists('..\packages\ANGLE.WindowsStore.Servo.2.1.16\build\native\ANGLE.WindowsStore.Servo.targets')" Text="$([System.String]::Format('$(ErrorText)', '..\packages\ANGLE.WindowsStore.Servo.2.1.16\build\native\ANGLE.WindowsStore.Servo.targets'))" />
   </Target>
 </Project>

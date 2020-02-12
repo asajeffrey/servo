@@ -864,6 +864,12 @@
       <Filter>ReleaseServoDLLs</Filter>
     </None>
     <None Include="$(OpenXRLoaderBinaryRoot)\bin\openxr_loader.dll" />
+    <None Include="..\..\..\..\ms-angle\winrt\10\src\Debug_x64\libEGL.dll">
+      <Filter>DebugServoDLLs</Filter>
+    </None>
+    <None Include="..\..\..\..\ms-angle\winrt\10\src\Debug_x64\libGLESv2.dll">
+      <Filter>DebugServoDLLs</Filter>
+    </None>
   </ItemGroup>
   <ItemGroup>
     <Filter Include="Assets">
