@@ -34,9 +34,11 @@ spirv_cross = { git = "https://github.com/servo/spirv_cross", branch = "wgpu-ser
 backtrace = { git = "https://github.com/MeFisto94/backtrace-rs", branch = "fix-strtab-freeing-crash" }
 surfman-chains = { git = "https://github.com/asajeffrey/surfman-chains", branch = "multi" }
 surfman = { git = "https://github.com/asajeffrey/surfman", branch = "servo-surfmanup" }
+# surfman = { path = "../surfman/surfman" }
 
 [patch."https://github.com/pcwalton/surfman"]
 surfman = { git = "https://github.com/asajeffrey/surfman", branch = "servo-surfmanup" }
+# surfman = { path = "../surfman/surfman" }
 
 [patch."https://github.com/servo/webxr"]
 webxr-api = {git = "https://github.com/asajeffrey/webxr", branch = "surfmanup"}

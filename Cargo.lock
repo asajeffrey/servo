@@ -5441,6 +5441,7 @@ dependencies = [
  "libservo",
  "log",
  "servo-media",
+ "surfman",
  "webxr",
  "webxr-api",
  "winapi",
@@ -5457,6 +5458,7 @@ dependencies = [
  "libc",
  "log",
  "simpleservo",
+ "surfman",
  "winapi",
 ]
 
@@ -5746,7 +5748,7 @@ dependencies = [
 [[package]]
 name = "surfman"
 version = "0.2.0"
-source = "git+https://github.com/asajeffrey/surfman?branch=servo-surfmanup#d614d21d30ae2a1e1fe249bee1ecebea127728dc"
+source = "git+https://github.com/asajeffrey/surfman?branch=servo-surfmanup#6212a49a349f788d0e230f356379f5a702a0fbe5"
 dependencies = [
  "bitflags",
  "cgl 0.3.2",
