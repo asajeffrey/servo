@@ -20,8 +20,8 @@ use surfman::SurfaceTexture;
 use surfman_chains::SwapChains;
 use surfman_chains_api::SwapChainAPI;
 use surfman_chains_api::SwapChainsAPI;
-use webrender_traits::{WebrenderExternalImageApi, WebrenderExternalImageRegistry};
 use webrender_traits::WebrenderSurfman;
+use webrender_traits::{WebrenderExternalImageApi, WebrenderExternalImageRegistry};
 use webxr_api::SwapChainId as WebXRSwapChainId;
 
 pub struct WebGLComm {
@@ -87,10 +87,7 @@ struct WebGLExternalImages {
 }
 
 impl WebGLExternalImages {
-    fn new(
-        surfman: WebrenderSurfman,
-        swap_chains: SwapChains<WebGLContextId, Device>,
-    ) -> Self {
+    fn new(surfman: WebrenderSurfman, swap_chains: SwapChains<WebGLContextId, Device>) -> Self {
         Self {
             surfman,
             swap_chains,
@@ -108,10 +105,11 @@ impl WebGLExternalImages {
             ..
         } = self.surfman.device().surface_info(&front_buffer);
         debug!("... getting texture for surface {:?}", front_buffer_id);
-        let front_buffer_texture = self.surfman
-            .create_surface_texture(front_buffer)
-            .unwrap();
-        let gl_texture = self.surfman.device().surface_texture_object(&front_buffer_texture);
+        let front_buffer_texture = self.surfman.create_surface_texture(front_buffer).unwrap();
+        let gl_texture = self
+            .surfman
+            .device()
+            .surface_texture_object(&front_buffer_texture);
 
         self.locked_front_buffers.insert(id, front_buffer_texture);
 
@@ -120,7 +118,8 @@ impl WebGLExternalImages {
 
     fn unlock_swap_chain(&mut self, id: WebGLContextId) -> Option<()> {
         let locked_front_buffer = self.locked_front_buffers.remove(&id)?;
-        let locked_front_buffer = self.surfman
+        let locked_front_buffer = self
+            .surfman
             .destroy_surface_texture(locked_front_buffer)
             .unwrap();
 

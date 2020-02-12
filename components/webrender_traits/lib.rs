@@ -5,8 +5,8 @@
 #![deny(unsafe_code)]
 
 use euclid::default::Size2D;
-use std::collections::HashMap;
 use std::cell::RefCell;
+use std::collections::HashMap;
 use std::ffi::c_void;
 use std::rc::Rc;
 use std::sync::{Arc, Mutex};
@@ -14,14 +14,14 @@ use surfman::Adapter;
 use surfman::Connection;
 use surfman::Context;
 use surfman::ContextAttributes;
-use surfman::Error;
 use surfman::Device;
+use surfman::Error;
 use surfman::NativeWidget;
-use surfman::SurfaceAccess;
-use surfman::SurfaceType;
 use surfman::Surface;
+use surfman::SurfaceAccess;
 use surfman::SurfaceInfo;
 use surfman::SurfaceTexture;
+use surfman::SurfaceType;
 use webrender_api::units::TexelRect;
 
 /// This trait is used as a bridge between the different GL clients
@@ -182,29 +182,48 @@ impl Drop for WebrenderSurfmanData {
 }
 
 impl WebrenderSurfman {
-    pub fn create(connection: &Connection, adapter: &Adapter, context_attributes: ContextAttributes, native_widget: NativeWidget) -> Result<Self, Error> {
+    pub fn new(device: Device, context: Context) -> Self {
+        let context = RefCell::new(context);
+        WebrenderSurfman(Rc::new(WebrenderSurfmanData { device, context }))
+    }
+
+    pub fn create(
+        connection: &Connection,
+        adapter: &Adapter,
+        context_attributes: ContextAttributes,
+        native_widget: NativeWidget,
+    ) -> Result<Self, Error> {
         let mut device = connection.create_device(&adapter)?;
-	let context_descriptor = device.create_context_descriptor(&context_attributes)?;
+        let context_descriptor = device.create_context_descriptor(&context_attributes)?;
         let mut context = device.create_context(&context_descriptor)?;
         let surface_access = SurfaceAccess::GPUOnly;
         let surface_type = SurfaceType::Widget { native_widget };
-	let surface = device.create_surface(&context, surface_access, surface_type)?;
-        device.bind_surface_to_context(&mut context, surface).map_err(|(err, mut surface)| {
-	    let _ = device.destroy_surface(&mut context, &mut surface);
-	    err
-	})?;
-	let context = RefCell::new(context);
-        Ok(WebrenderSurfman(Rc::new(WebrenderSurfmanData { device, context })))
+        let surface = device.create_surface(&context, surface_access, surface_type)?;
+        device
+            .bind_surface_to_context(&mut context, surface)
+            .map_err(|(err, mut surface)| {
+                let _ = device.destroy_surface(&mut context, &mut surface);
+                err
+            })?;
+        Ok(WebrenderSurfman::new(device, context))
     }
 
-    pub fn create_surface_texture(&self, surface: Surface) -> Result<SurfaceTexture, (Error, Surface)> {
+    pub fn create_surface_texture(
+        &self,
+        surface: Surface,
+    ) -> Result<SurfaceTexture, (Error, Surface)> {
         let ref mut context = self.0.context.borrow_mut();
         self.0.device.create_surface_texture(context, surface)
     }
 
-    pub fn destroy_surface_texture(&self, surface_texture: SurfaceTexture) -> Result<Surface, (Error, SurfaceTexture)> {
+    pub fn destroy_surface_texture(
+        &self,
+        surface_texture: SurfaceTexture,
+    ) -> Result<Surface, (Error, SurfaceTexture)> {
         let ref mut context = self.0.context.borrow_mut();
-        self.0.device.destroy_surface_texture(context, surface_texture)
+        self.0
+            .device
+            .destroy_surface_texture(context, surface_texture)
     }
 
     pub fn make_gl_context_current(&self) -> Result<(), Error> {
@@ -216,10 +235,13 @@ impl WebrenderSurfman {
         let ref mut context = self.0.context.borrow_mut();
         let mut surface = self.0.device.unbind_surface_from_context(context)?.unwrap();
         self.0.device.present_surface(context, &mut surface)?;
-        self.0.device.bind_surface_to_context(context, surface).map_err(|(err, mut surface)| {
-	    let _ = self.0.device.destroy_surface(context, &mut surface);
-	    err
-	})
+        self.0
+            .device
+            .bind_surface_to_context(context, surface)
+            .map_err(|(err, mut surface)| {
+                let _ = self.0.device.destroy_surface(context, &mut surface);
+                err
+            })
     }
 
     pub fn context_surface_info(&self) -> Result<Option<SurfaceInfo>, Error> {
@@ -229,7 +251,7 @@ impl WebrenderSurfman {
 
     pub fn get_proc_address(&self, name: &str) -> *const c_void {
         let ref context = self.0.context.borrow();
-	self.0.device.get_proc_address(context, name)
+        self.0.device.get_proc_address(context, name)
     }
 
     pub fn device(&self) -> &Device {

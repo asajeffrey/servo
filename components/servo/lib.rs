@@ -335,30 +335,31 @@ where
         let webrender_surfman = window.webrender_surfman();
 
         // Get GL bindings
-        let webrender_gl = 
-            match webrender_surfman.device().gl_api() {
-                GLApi::GL => unsafe { gl::GlFns::load_with(|s| webrender_surfman.get_proc_address(s)) },
-                GLApi::GLES => unsafe { gl::GlesFns::load_with(|s| webrender_surfman.get_proc_address(s)) },
-	  };
+        let webrender_gl = match webrender_surfman.device().gl_api() {
+            GLApi::GL => unsafe { gl::GlFns::load_with(|s| webrender_surfman.get_proc_address(s)) },
+            GLApi::GLES => unsafe {
+                gl::GlesFns::load_with(|s| webrender_surfman.get_proc_address(s))
+            },
+        };
 
         // Make sure the gl context is made current.
         webrender_surfman.make_gl_context_current().unwrap();
-	debug_assert_eq!(
-	    webrender_gl.get_error(),
-	    gleam::gl::NO_ERROR,
-	);
+        debug_assert_eq!(webrender_gl.get_error(), gleam::gl::NO_ERROR,);
 
         // Bind the webrender framebuffer
         let framebuffer_object = webrender_surfman
-	    .context_surface_info()
-	    .unwrap()
-	    .map(|info| info.framebuffer_object)
-	    .unwrap_or(0);
+            .context_surface_info()
+            .unwrap_or(None)
+            .map(|info| info.framebuffer_object)
+            .unwrap_or(0);
         webrender_gl.bind_framebuffer(gleam::gl::FRAMEBUFFER, framebuffer_object);
-	debug_assert_eq!(
-	    (webrender_gl.get_error(), webrender_gl.check_frame_buffer_status(gleam::gl::FRAMEBUFFER)),
-	    (gleam::gl::NO_ERROR, gleam::gl::FRAMEBUFFER_COMPLETE)
-	);
+        debug_assert_eq!(
+            (
+                webrender_gl.get_error(),
+                webrender_gl.check_frame_buffer_status(gleam::gl::FRAMEBUFFER)
+            ),
+            (gleam::gl::NO_ERROR, gleam::gl::FRAMEBUFFER_COMPLETE)
+        );
 
         // Reserving a namespace to create TopLevelBrowserContextId.
         PipelineNamespace::install(PipelineNamespaceId(0));
@@ -570,8 +571,8 @@ where
                 webrender,
                 webrender_document,
                 webrender_api,
-		webrender_surfman,
-		webrender_gl,
+                webrender_surfman,
+                webrender_gl,
                 webvr_heartbeats,
                 webxr_main_thread,
             },
@@ -1070,7 +1071,7 @@ fn create_webgl_threads(
         output_handler,
     } = WebGLComm::new(
         webrender_surfman,
-	webrender_gl,
+        webrender_gl,
         webrender_api_sender,
         webvr_compositor.map(|compositor| compositor as Box<_>),
         external_images,

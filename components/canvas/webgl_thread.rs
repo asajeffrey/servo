@@ -417,7 +417,10 @@ impl WebGLThread {
         requested_size: Size2D<u32>,
         attributes: GLContextAttributes,
     ) -> Result<(WebGLContextId, webgl::GLLimits), String> {
-        debug!("WebGLThread::create_webgl_context({:?}, {:?}, {:?})", webgl_version, requested_size, attributes);
+        debug!(
+            "WebGLThread::create_webgl_context({:?}, {:?}, {:?})",
+            webgl_version, requested_size, attributes
+        );
 
         // Creating a new GLContext may make the current bound context_id dirty.
         // Clear it to ensure that  make_current() is called in subsequent commands.
@@ -2835,7 +2838,7 @@ trait SurfmanContextAttributeFlagsConvert {
     fn to_surfman_context_attribute_flags(
         &self,
         webgl_version: WebGLVersion,
-	api_type: gl::GlType,
+        api_type: gl::GlType,
     ) -> ContextAttributeFlags;
 }
 
@@ -2843,7 +2846,7 @@ impl SurfmanContextAttributeFlagsConvert for GLContextAttributes {
     fn to_surfman_context_attribute_flags(
         &self,
         webgl_version: WebGLVersion,
-	api_type: gl::GlType,
+        api_type: gl::GlType,
     ) -> ContextAttributeFlags {
         let mut flags = ContextAttributeFlags::empty();
         flags.set(ContextAttributeFlags::ALPHA, self.alpha);
