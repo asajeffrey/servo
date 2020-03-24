@@ -5697,7 +5697,7 @@ dependencies = [
 [[package]]
 name = "surfman"
 version = "0.2.0"
-source = "git+https://github.com/asajeffrey/surfman?branch=servo-surfmanup#75e89925b0789eda9ac3beb491781558f3c941e0"
+source = "git+https://github.com/asajeffrey/surfman?branch=servo-surfmanup#6a948412c7af401fe1db11e353528b814d17f227"
 dependencies = [
  "bitflags",
  "cgl 0.3.2",
@@ -6609,7 +6609,7 @@ dependencies = [
 [[package]]
 name = "webxr"
 version = "0.0.1"
-source = "git+https://github.com/asajeffrey/webxr?branch=surfmanup#9c1034ac7426392981cbaec3dea789c07d688df9"
+source = "git+https://github.com/asajeffrey/webxr?branch=surfmanup#33ebf33eb01c19926bfe898e5d209bc92209b0bf"
 dependencies = [
  "bindgen",
  "crossbeam-channel",
@@ -6631,7 +6631,7 @@ dependencies = [
 [[package]]
 name = "webxr-api"
 version = "0.0.1"
-source = "git+https://github.com/asajeffrey/webxr?branch=surfmanup#9c1034ac7426392981cbaec3dea789c07d688df9"
+source = "git+https://github.com/asajeffrey/webxr?branch=surfmanup#33ebf33eb01c19926bfe898e5d209bc92209b0bf"
 dependencies = [
  "euclid",
  "ipc-channel",
