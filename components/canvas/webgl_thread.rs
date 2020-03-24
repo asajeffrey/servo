@@ -255,7 +255,7 @@ pub(crate) struct WebGLThread {
 }
 
 pub type WebGlExecutor = crossbeam_channel::Sender<WebGlRunnable>;
-pub type WebGlRunnable = Box<dyn FnOnce() + Send>;
+pub type WebGlRunnable = Box<dyn FnOnce(&Device) + Send>;
 pub type SurfaceProviders = Arc<Mutex<HashMap<SessionId, SurfaceProvider>>>;
 pub type SurfaceProvider = Box<dyn surfman_chains::SurfaceProvider<Device> + Send>;
 
@@ -346,7 +346,7 @@ impl WebGLThread {
                 }
                 recv(self.runnable_receiver) -> msg => {
                     if let Ok(msg) = msg {
-                        msg();
+                        msg(&self.device);
                     } else {
                         self.runnable_receiver = crossbeam_channel::never();
                     }
