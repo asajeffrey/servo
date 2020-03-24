@@ -776,7 +776,7 @@ impl EmbedderMethods for ServoEmbedderCallbacks {
 
         struct GlThread(WebGlExecutor);
         impl webxr::openxr::GlThread for GlThread {
-            fn execute(&self, runnable: Box<dyn FnOnce() + Send>) {
+            fn execute(&self, runnable: Box<dyn FnOnce(&surfman::Device) + Send>) {
                 let _ = self.0.send(runnable);
             }
             fn clone(&self) -> Box<dyn webxr::openxr::GlThread> {
