@@ -55,6 +55,7 @@ use gstreamer_base::BaseSrcExt;
 use gstreamer_gl::GLContext;
 use gstreamer_gl::GLContextExt;
 use gstreamer_gl::GLContextExtManual;
+use gstreamer_gl::GLDisplay;
 use gstreamer_gl::GLSyncMeta;
 use gstreamer_gl_sys::gst_gl_context_thread_add;
 use gstreamer_gl_sys::gst_gl_texture_target_to_gl;
@@ -108,6 +109,7 @@ pub struct ServoWebSrc {
     url: Mutex<Option<String>>,
     info: Mutex<Option<VideoInfo>>,
     buffer_pool: Mutex<Option<BufferPool>>,
+    gl_display: Mutex<Option<GLDisplay>>,
     gl_context: Mutex<Option<GLContext>>,
     connection: Mutex<Option<Connection>>,
     // When did the plugin get created?
@@ -324,6 +326,7 @@ impl ObjectSubclass for ServoWebSrc {
         let info = Mutex::new(None);
         let url = Mutex::new(None);
         let buffer_pool = Mutex::new(None);
+        let gl_display = Mutex::new(None);
         let gl_context = Mutex::new(None);
         let connection = Mutex::new(None);
         let start = Instant::now();
@@ -334,6 +337,7 @@ impl ObjectSubclass for ServoWebSrc {
             info,
             url,
             buffer_pool,
+            gl_display,
             gl_context,
             connection,
             start,
@@ -470,6 +474,9 @@ impl BaseSrcImpl for ServoWebSrc {
         let url = ServoUrl::parse(url_string)
             .map_err(|_| gst_error_msg!(ResourceError::Settings, ["Failed to parse url"]))?;
 
+        // Get the GL display
+        let gl_display = GLDisplay::new();
+
         // Get the downstream GL context
         let mut gst_gl_context = std::ptr::null_mut();
         let el = src.upcast_ref::<Element>();
@@ -480,13 +487,24 @@ impl BaseSrcImpl for ServoWebSrc {
                 &mut gst_gl_context,
             );
         }
+
+        // If we failed to find a downstream context , create a new one
+        // https://github.com/servo/servo/issues/27013
+        let gl_context = if gst_gl_context.is_null() {
+            let gl_context = GLContext::new(&gl_display);
+            gst_gl_context = gl_context.to_glib_none().0;
+            gl_context
+        } else {
+            unsafe { GLContext::from_glib_borrow(gst_gl_context) }
+        };
+
+        // At this point we should have a GL context
         if gst_gl_context.is_null() {
             return Err(gst_error_msg!(
                 ResourceError::Settings,
                 ["Failed to get GL context"]
             ));
         }
-        let gl_context = unsafe { GLContext::from_glib_borrow(gst_gl_context) };
 
         // Get the surfman connection on the GL thread
         let mut task = BootstrapSurfmanOnGLThread {
@@ -494,13 +512,16 @@ impl BaseSrcImpl for ServoWebSrc {
             result: None,
         };
 
+        info!("Getting connection");
         let data = &mut task as *mut BootstrapSurfmanOnGLThread as *mut c_void;
         unsafe {
             gst_gl_context_thread_add(gst_gl_context, Some(bootstrap_surfman_on_gl_thread), data)
         };
         let connection = task.result.expect("Failed to get connection");
+        info!("Got connection");
 
-        // Save the GL context and connection for later use
+        // Save the GL display, context and connection for later use
+        *self.gl_display.lock().expect("Poisoned lock") = Some(gl_display);
         *self.gl_context.lock().expect("Poisoned lock") = Some(gl_context);
         *self.connection.lock().expect("Poisoned lock") = Some(connection.clone());
 
@@ -509,6 +530,8 @@ impl BaseSrcImpl for ServoWebSrc {
             ConnectionWhichImplementsDebug(connection),
             url,
         ));
+
+        info!("Started");
         Ok(())
     }
 
