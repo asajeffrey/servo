@@ -217,7 +217,13 @@ impl ServoThread {
         let swap_chain = match webxr_mode {
             None => Some(webrender_swap_chain),
             Some(..) => {
+                set_pref!(dom.webxr.user_intent, true);
                 set_pref!(dom.webxr.sessionavailable, true);
+                set_pref!(dom.gamepad.enabled, true);
+                set_pref!(dom.svg.enabled, true);
+                set_pref!(dom.canvas_capture.enabled, true);
+                set_pref!(dom.webrtc.enabled, true);
+                set_pref!(dom.webrtc.transceiver.enabled, true);
                 servo.handle_events(vec![WindowEvent::ChangeBrowserVisibility(id, false)]);
                 None
             },
@@ -924,9 +930,18 @@ impl ServoWebSrc {
 
             if gfx.swap_chain.is_none() {
                 debug!("Getting the swap chain");
-                let (acks, ackr) = crossbeam_channel::bounded(1);
-                let _ = self.sender.send(ServoWebSrcMsg::GetSwapChain(acks));
-                gfx.swap_chain = ackr.recv_timeout(Duration::from_millis(16)).ok();
+                debug!("creating");
+                let (acks, ackr) = crossbeam_channel::unbounded();
+                debug!("sending");
+                if self
+                    .sender
+                    .try_send(ServoWebSrcMsg::GetSwapChain(acks))
+                    .is_ok()
+                {
+                    debug!("recving");
+                    gfx.swap_chain = ackr.recv_timeout(Duration::from_millis(16)).ok();
+                }
+                debug!("Got the swap chain {}", gfx.swap_chain.is_none());
             }
 
             gfx.device
