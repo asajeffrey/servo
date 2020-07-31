@@ -2,7 +2,7 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 
-// https://immersive-web.github.io/webxr/#xrwebgllayer-interface
+// https://immersive-web.github.io/webxr/#xrwebgllayer
 
 typedef (WebGLRenderingContext or
          WebGL2RenderingContext) XRWebGLRenderingContext;
@@ -17,19 +17,19 @@ dictionary XRWebGLLayerInit {
 };
 
 [SecureContext, Exposed=Window, Pref="dom.webxr.enabled"]
-interface XRWebGLLayer {
+interface XRWebGLLayer: XRLayer {
   [Throws] constructor(XRSession session,
               XRWebGLRenderingContext context,
               optional XRWebGLLayerInit layerInit = {});
-  // // Attributes
+  // Attributes
   readonly attribute boolean antialias;
   readonly attribute boolean ignoreDepthValues;
 
-  readonly attribute WebGLFramebuffer? framebuffer;
+  [SameObject] readonly attribute WebGLFramebuffer? framebuffer;
   readonly attribute unsigned long framebufferWidth;
   readonly attribute unsigned long framebufferHeight;
 
-  // // Methods
+  // Methods
   XRViewport? getViewport(XRView view);
 
   // // Static Methods
