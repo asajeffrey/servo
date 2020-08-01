@@ -16,7 +16,6 @@ use crate::dom::bindings::codegen::Bindings::XRSessionBinding::XRFrameRequestCal
 use crate::dom::bindings::codegen::Bindings::XRSessionBinding::XRSessionMethods;
 use crate::dom::bindings::codegen::Bindings::XRSessionBinding::XRVisibilityState;
 use crate::dom::bindings::codegen::Bindings::XRSystemBinding::XRSessionMode;
-use crate::dom::bindings::codegen::Bindings::XRWebGLLayerBinding::XRWebGLRenderingContext;
 use crate::dom::bindings::error::{Error, ErrorResult};
 use crate::dom::bindings::inheritance::Castable;
 use crate::dom::bindings::refcounted::Trusted;
@@ -604,7 +603,7 @@ impl XRSessionMethods for XRSession {
         }
 
         // TODO: Add the checks in
-	// https://immersive-web.github.io/layers/#updaterenderstatechanges
+        // https://immersive-web.github.io/layers/#updaterenderstatechanges
 
         let pending = self
             .pending_render_state
@@ -641,7 +640,8 @@ impl XRSessionMethods for XRSession {
         if let Some(ref layer) = init.baseLayer {
             pending.set_base_layer(layer.as_deref());
             pending.set_layers(Vec::new());
-            let layers = layer.iter()
+            let layers = layer
+                .iter()
                 .filter_map(|layer| {
                     let context_id = WebXRContextId::from(layer.context_id());
                     let layer_id = layer.layer_id()?;
@@ -657,9 +657,9 @@ impl XRSessionMethods for XRSession {
                 .update_clip_planes(*pending.DepthNear() as f32, *pending.DepthFar() as f32);
         }
 
-	// https://immersive-web.github.io/layers/#updaterenderstatechanges
+        // https://immersive-web.github.io/layers/#updaterenderstatechanges
         if let Some(ref layers) = init.layers {
-	    let layers = layers.unwrap_or_default();
+            let layers = layers.as_deref().unwrap_or_default();
             pending.set_base_layer(None);
             pending.set_layers(layers.iter().map(|x| &**x).collect());
             let layers = layers

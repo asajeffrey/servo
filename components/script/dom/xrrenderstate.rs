@@ -5,19 +5,18 @@
 use crate::dom::bindings::cell::DomRefCell;
 use crate::dom::bindings::codegen::Bindings::XRRenderStateBinding::XRRenderStateMethods;
 use crate::dom::bindings::num::Finite;
-use crate::dom::bindings::root::Dom;
 use crate::dom::bindings::reflector::{reflect_dom_object, DomObject, Reflector};
+use crate::dom::bindings::root::Dom;
 use crate::dom::bindings::root::{DomRoot, MutNullableDom};
+use crate::dom::bindings::utils::to_frozen_array;
 use crate::dom::globalscope::GlobalScope;
-use crate::dom::xrwebgllayer::XRWebGLLayer;
 use crate::dom::xrlayer::XRLayer;
-use js::jsval::JSVal;
+use crate::dom::xrwebgllayer::XRWebGLLayer;
 use crate::script_runtime::JSContext;
 use dom_struct::dom_struct;
+use js::jsval::JSVal;
 use std::cell::Cell;
 use webxr_api::SubImages;
-use std::ops::Deref;
-use crate::dom::bindings::utils::to_frozen_array;
 
 #[dom_struct]
 pub struct XRRenderState {
@@ -44,7 +43,12 @@ impl XRRenderState {
             depth_far: Cell::new(depth_far),
             inline_vertical_fov: Cell::new(inline_vertical_fov),
             base_layer: MutNullableDom::new(layer),
-            layers: DomRefCell::new(layers.into_iter().map(|layer| Dom::from_ref(layer)).collect()),
+            layers: DomRefCell::new(
+                layers
+                    .into_iter()
+                    .map(|layer| Dom::from_ref(layer))
+                    .collect(),
+            ),
         }
     }
 
@@ -93,7 +97,10 @@ impl XRRenderState {
         self.base_layer.set(layer)
     }
     pub fn set_layers(&self, layers: Vec<&XRLayer>) {
-        *self.layers.borrow_mut() = layers.into_iter().map(|layer| Dom::from_ref(layer)).collect();
+        *self.layers.borrow_mut() = layers
+            .into_iter()
+            .map(|layer| Dom::from_ref(layer))
+            .collect();
     }
     pub fn with_layers<F, R>(&self, f: F) -> R
     where
@@ -148,6 +155,8 @@ impl XRRenderStateMethods for XRRenderState {
     /// https://immersive-web.github.io/layers/#dom-xrrenderstate-layers
     fn Layers(&self, cx: JSContext) -> JSVal {
         // TODO: cache this array?
-	to_frozen_array(&self.layers[..], cx)
+        let layers = self.layers.borrow();
+        let layers: Vec<&XRLayer> = layers.iter().map(|x| &**x).collect();
+        to_frozen_array(&layers[..], cx)
     }
 }

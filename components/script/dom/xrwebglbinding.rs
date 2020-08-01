@@ -7,15 +7,9 @@ use crate::dom::bindings::reflector::reflect_dom_object;
 use crate::dom::bindings::reflector::Reflector;
 use crate::dom::bindings::root::Dom;
 use crate::dom::bindings::root::DomRoot;
-use crate::dom::webgl2renderingcontext::WebGL2RenderingContext;
 use crate::dom::webglrenderingcontext::WebGLRenderingContext;
 use crate::dom::window::Window;
-use crate::dom::xrframe::XRFrame;
-use crate::dom::xrlayer::XRLayer;
 use crate::dom::xrsession::XRSession;
-use crate::dom::xrview::XRView;
-use crate::dom::xrwebglsubimage::XRWebGLSubImage;
-use canvas_traits::webgl::WebGLContextId;
 use dom_struct::dom_struct;
 
 #[dom_struct]
@@ -26,10 +20,7 @@ pub struct XRWebGLBinding {
 }
 
 impl XRWebGLBinding {
-    pub fn new_inherited(
-        session: &XRSession,
-        context: &WebGLRenderingContext,
-    ) -> XRWebGLBinding {
+    pub fn new_inherited(session: &XRSession, context: &WebGLRenderingContext) -> XRWebGLBinding {
         XRWebGLBinding {
             reflector: Reflector::new(),
             session: Dom::from_ref(session),
@@ -55,11 +46,11 @@ impl XRWebGLBinding {
         context: WebGLRenderingContextOrWebGL2RenderingContext,
     ) -> DomRoot<XRWebGLBinding> {
         let context = match context {
-	};
-        XRWebGLBinding::new(
-            global,
-            session,
-            context,
-        )
+            WebGLRenderingContextOrWebGL2RenderingContext::WebGLRenderingContext(ctx) => ctx,
+            WebGLRenderingContextOrWebGL2RenderingContext::WebGL2RenderingContext(ctx) => {
+                ctx.base_context()
+            },
+        };
+        XRWebGLBinding::new(global, session, &context)
     }
 }
