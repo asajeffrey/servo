@@ -141,13 +141,9 @@ impl WebGLFramebuffer {
     // https://github.com/servo/servo/issues/24498
     pub fn maybe_new_webxr(
         session: &XRSession,
-        context: &XRWebGLRenderingContext,
+        context: &WebGLRenderingContext,
         size: Size2D<i32, Viewport>,
     ) -> Option<DomRoot<Self>> {
-        let context = match context {
-            XRWebGLRenderingContext::WebGLRenderingContext(ref ctx) => DomRoot::from_ref(&**ctx),
-            XRWebGLRenderingContext::WebGL2RenderingContext(ref ctx) => ctx.base_context(),
-        };
         let framebuffer = Self::maybe_new(&*context)?;
         framebuffer.size.set(Some((size.width, size.height)));
         framebuffer.status.set(constants::FRAMEBUFFER_COMPLETE);

@@ -17,6 +17,7 @@ use dom_struct::dom_struct;
 use std::cell::Cell;
 use webxr_api::SubImages;
 use std::ops::Deref;
+use crate::dom::bindings::utils::to_frozen_array;
 
 #[dom_struct]
 pub struct XRRenderState {
@@ -34,7 +35,7 @@ impl XRRenderState {
         depth_far: f64,
         inline_vertical_fov: Option<f64>,
         layer: Option<&XRWebGLLayer>,
-        layers: &[XRLayer],
+        layers: Vec<&XRLayer>,
     ) -> XRRenderState {
         debug_assert!(layer.is_none() || layers.is_empty());
         XRRenderState {
@@ -43,7 +44,7 @@ impl XRRenderState {
             depth_far: Cell::new(depth_far),
             inline_vertical_fov: Cell::new(inline_vertical_fov),
             base_layer: MutNullableDom::new(layer),
-            layers: todo!(),// DomRefCell::new(layers.iter().cloned().collect()),
+            layers: DomRefCell::new(layers.into_iter().map(|layer| Dom::from_ref(layer)).collect()),
         }
     }
 
@@ -53,7 +54,7 @@ impl XRRenderState {
         depth_far: f64,
         inline_vertical_fov: Option<f64>,
         layer: Option<&XRWebGLLayer>,
-        layers: &[XRLayer],
+        layers: Vec<&XRLayer>,
     ) -> DomRoot<XRRenderState> {
         reflect_dom_object(
             Box::new(XRRenderState::new_inherited(
@@ -68,14 +69,13 @@ impl XRRenderState {
     }
 
     pub fn clone_object(&self) -> DomRoot<Self> {
-        let layers = todo!();
         XRRenderState::new(
             &self.global(),
             self.depth_near.get(),
             self.depth_far.get(),
             self.inline_vertical_fov.get(),
             self.base_layer.get().as_ref().map(|x| &**x),
-            &layers,
+            self.layers.borrow().iter().map(|x| &**x).collect(),
         )
     }
 
@@ -92,8 +92,8 @@ impl XRRenderState {
     pub fn set_base_layer(&self, layer: Option<&XRWebGLLayer>) {
         self.base_layer.set(layer)
     }
-    pub fn set_layers<T>(&self, layers: T) where T: IntoIterator, T::Item: Deref<Target=XRLayer> {
-        *self.layers.borrow_mut() = layers.into_iter().map(|layer| Dom::from_ref(&*layer)).collect();
+    pub fn set_layers(&self, layers: Vec<&XRLayer>) {
+        *self.layers.borrow_mut() = layers.into_iter().map(|layer| Dom::from_ref(layer)).collect();
     }
     pub fn with_layers<F, R>(&self, f: F) -> R
     where
@@ -147,6 +147,7 @@ impl XRRenderStateMethods for XRRenderState {
 
     /// https://immersive-web.github.io/layers/#dom-xrrenderstate-layers
     fn Layers(&self, cx: JSContext) -> JSVal {
-        todo!()
+        // TODO: cache this array?
+	to_frozen_array(&self.layers[..], cx)
     }
 }

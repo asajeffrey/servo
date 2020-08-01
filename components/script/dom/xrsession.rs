@@ -132,7 +132,7 @@ impl XRSession {
         } else {
             None
         };
-        let render_state = XRRenderState::new(global, 0.1, 1000.0, ivfov, None, &[]);
+        let render_state = XRRenderState::new(global, 0.1, 1000.0, ivfov, None, Vec::new());
         let input_sources = XRInputSourceArray::new(global);
         let ret = reflect_dom_object(
             Box::new(XRSession::new_inherited(
@@ -640,7 +640,7 @@ impl XRSessionMethods for XRSession {
         }
         if let Some(ref layer) = init.baseLayer {
             pending.set_base_layer(layer.as_deref());
-            pending.set_layers(&[]);
+            pending.set_layers(Vec::new());
             let layers = layer.iter()
                 .filter_map(|layer| {
                     let context_id = WebXRContextId::from(layer.context_id());
@@ -661,7 +661,7 @@ impl XRSessionMethods for XRSession {
         if let Some(ref layers) = init.layers {
 	    let layers = layers.unwrap_or_default();
             pending.set_base_layer(None);
-            pending.set_layers(&layers[..]);
+            pending.set_layers(layers.iter().map(|x| &**x).collect());
             let layers = layers
                 .iter()
                 .filter_map(|layer| {

@@ -65,7 +65,7 @@ pub struct XRWebGLLayer {
 impl XRWebGLLayer {
     pub fn new_inherited(
         session: &XRSession,
-        context: XRWebGLRenderingContext,
+        context: &WebGLRenderingContext,
         init: &XRWebGLLayerInit,
         framebuffer: Option<&WebGLFramebuffer>,
         layer_id: Option<LayerId>,
@@ -84,7 +84,7 @@ impl XRWebGLLayer {
     pub fn new(
         global: &GlobalScope,
         session: &XRSession,
-        context: XRWebGLRenderingContext,
+        context: &WebGLRenderingContext,
         init: &XRWebGLLayerInit,
         framebuffer: Option<&WebGLFramebuffer>,
         layer_id: Option<LayerId>,
@@ -151,7 +151,7 @@ impl XRWebGLLayer {
         Ok(XRWebGLLayer::new(
             &global.global(),
             session,
-            context,
+            &context,
             init,
             framebuffer.as_deref(),
             layer_id,
